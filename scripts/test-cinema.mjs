@@ -1,0 +1,21 @@
+import { build } from 'esbuild';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+await mkdir('.sites-runtime',{recursive:true});
+await build({entryPoints:['lib/cinema/provider.ts'],bundle:true,platform:'node',format:'esm',outfile:'.sites-runtime/provider-test.mjs'});
+const {literalField,detail,playback,fetchConfig}=await import('../.sites-runtime/provider-test.mjs');
+const originalFetch=globalThis.fetch;
+const media={hls:'https://cdn.example.test/master.m3u8',audio:{names:['Рус. Дублированный','Кубик в кубе','Eng.Original']},cc:[{url:'https://cdn.example.test/ru.vtt',name:'Рус. полные'}]};
+function mock(config){globalThis.fetch=async()=>new Response('makePlayer('+JSON.stringify(config)+');',{headers:{'Content-Type':'text/html'}});}
+await test('literal parser handles quoted braces, escapes and trailing commas',()=>{assert.deepEqual(literalField(`source: {title:'a } b',audio:{names:['a', 'b',]},}, p2p:{tracker:function(){}}`,'source'),{title:'a } b',audio:{names:['a','b']}});});
+await test('does not execute provider JavaScript',()=>{assert.throws(()=>literalField('source: {hls: (() => {throw new Error("executed")})()},','source'));});
+await test('invalid ID rejected before network request',async()=>{let calls=0;globalThis.fetch=async()=>{calls++;return new Response('');};await assert.rejects(fetchConfig('../123'));assert.equal(calls,0);});
+await test('seasons sorted in chronological order and episode IDs preserved',async()=>{mock({playlist:{seasons:[{season:3,episodes:[{...media,episode:2},{...media,episode:1}]},{season:1,episodes:[{...media,episode:1}]}]}});const d=await detail('123');assert.deepEqual(d.episodes.map(x=>x.key),['1:1','3:1','3:2']);});
+await test('real episode requires original and subtitles',async()=>{mock({source:{...media,audio:{names:['Рус. Дублированный']}}});await assert.rejects(playback('123',0,1),/оригинальной/);mock({source:{...media,cc:[]}});await assert.rejects(playback('123',0,1),/субтитров/);});
+await test('series requires multiple Russian voiceovers',async()=>{mock({playlist:{seasons:[{season:1,episodes:[{...media,episode:1,audio:{names:['Рус. Дублированный','Eng.Original']}}]}]}});await assert.rejects(playback('123',1,1),/несколько русских/);});
+await test('missing episode never falls back to another episode',async()=>{mock({playlist:{seasons:[{season:1,episodes:[{...media,episode:1}]}]}});await assert.rejects(playback('123',1,2),/не найдена/);});
+await test('URLs remain external; unknown resolution is not advertised as 1080',async()=>{mock({source:media});const p=await playback('123',0,1);assert.equal(p.sources[0].url,media.hls);assert.equal(p.sources[0].quality,0);assert.equal(p.audios.length,3);});
+await test('HTTP and invalid stream URLs are rejected',async()=>{mock({source:{...media,hls:'javascript:alert(1)'}});await assert.rejects(playback('123',0,1),/Формат/);});
+await test('blocked provider never yields playable media',async()=>{mock({blocked:true,source:media});await assert.rejects(playback('123',0,1),/ограничил/);});
+globalThis.fetch=originalFetch;
