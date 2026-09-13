@@ -18,7 +18,13 @@ jobs:
   checks:
     name: Checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      app_image: ${{ steps.publish.outputs.app_image }}
+      extractor_image: ${{ steps.publish.outputs.extractor_image }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -45,6 +51,27 @@ jobs:
         run: docker run --rm -v "$PWD/extractor/test_service.py:/service/test_service.py:ro" kadr-extractor:local python -m unittest test_service
       - name: Private Docker network smoke test
         run: python3 tests/docker-extractor-check.py
+      - name: Publish tested images to GHCR
+        id: publish
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          app="$prefix/app:$GITHUB_SHA"
+          extractor="$prefix/extractor:$GITHUB_SHA"
+          docker tag kadr-anime:local "$app"
+          docker tag kadr-extractor:local "$extractor"
+          docker push "$app"
+          docker push "$extractor"
+          # Deployment pins the actual pushed manifests, not mutable tags.
+          echo "app_image=$(docker inspect --format '{{index .RepoDigests 0}}' "$app")" >> "$GITHUB_OUTPUT"
+          echo "extractor_image=$(docker inspect --format '{{index .RepoDigests 0}}' "$extractor")" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Deploy main
@@ -62,6 +89,8 @@ jobs:
       - name: Transfer and deploy checked commit
         shell: bash
         env:
+          APP_IMAGE: ${{ needs.checks.outputs.app_image }}
+          EXTRACTOR_IMAGE: ${{ needs.checks.outputs.extractor_image }}
           GH_TOKEN: ${{ github.token }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -86,12 +115,17 @@ jobs:
           umask 077
           ssh_dir=$(mktemp -d)
           archive=$(mktemp)
-          trap 'rm -rf "$ssh_dir"; rm -f "$archive"' EXIT
+          bundle=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"; rm -f "$archive"; rm -rf "$bundle"' EXIT
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
           ssh_opts=(-i "$ssh_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
           target="$DEPLOY_USER@$DEPLOY_HOST"
-          git archive --format=tar.gz "$GITHUB_SHA" > "$archive"
+          [[ "$APP_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          [[ "$EXTRACTOR_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          cp compose.production.yaml "$bundle/"
+          printf 'APP_IMAGE=%s\nEXTRACTOR_IMAGE=%s\n' "$APP_IMAGE" "$EXTRACTOR_IMAGE" > "$bundle/images.env"
+          tar -czf "$archive" -C "$bundle" compose.production.yaml images.env
           checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
           # shellcheck disable=SC2029 # Client expansion is intentional; every interpolated value is validated above.
           ssh "${ssh_opts[@]}" "$target" "umask 077; mkdir -p '$DEPLOY_ROOT/incoming'; cat > '$DEPLOY_ROOT/incoming/$GITHUB_SHA.tar.gz'" < "$archive"

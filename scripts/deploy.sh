@@ -29,21 +29,26 @@ fi
 compose() {
   local dir=$1
   shift
-  DEPLOY_SHA="${dir##*/}" DEPLOY_PROJECT="$project" docker compose \
-    --project-name "$project" --env-file "$root/shared/.env" \
-    -f "$dir/compose.yaml" -f "$dir/compose.production.yaml" "$@"
+  if [[ -f "$dir/images.env" ]]; then
+    DEPLOY_SHA="${dir##*/}" docker compose --project-name "$project" \
+      --env-file "$root/shared/.env" --env-file "$dir/images.env" \
+      -f "$dir/compose.production.yaml" "$@"
+  else
+    # Allow rollback to releases from the former server-build workflow.
+    DEPLOY_SHA="${dir##*/}" DEPLOY_PROJECT="$project" docker compose \
+      --project-name "$project" --env-file "$root/shared/.env" \
+      -f "$dir/compose.yaml" -f "$dir/compose.production.yaml" "$@"
+  fi
 }
 compose "$release" config --quiet
-# Build failures leave the running release alone.
-if [[ "$previous" != "$release" ]]; then
-  compose "$release" build
-fi
+# Pull both pinned images before replacing any running containers.
+compose "$release" pull
 rollback() {
   local status=$?
   trap - ERR HUP INT TERM
   echo "Release $sha failed; deployment remains failed." >&2
   if [[ -n "$previous" ]]; then
-    if compose "$previous" up -d --no-build --wait --wait-timeout 180; then
+    if compose "$previous" up -d --no-build --pull never --wait --wait-timeout 180; then
       echo "Restored containers from ${previous##*/}. Database was not reverted." >&2
     else
       echo 'Rollback failed; inspect Docker health and restore manually.' >&2
@@ -56,7 +61,7 @@ rollback() {
 # No down, volume deletion, image pruning, or database restore during deployment.
 trap rollback ERR
 trap 'false' HUP INT TERM
-compose "$release" up -d --no-build --wait --wait-timeout 180
+compose "$release" up -d --no-build --pull never --wait --wait-timeout 180
 ln -sfn "$release" "$root/current.next"
 mv -Tf "$root/current.next" "$root/current"
 trap - ERR HUP INT TERM

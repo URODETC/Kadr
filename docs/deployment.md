@@ -1,6 +1,6 @@
 # CI/CD: dev → pull request → main → SSH
 
-Конфигурация рассчитана на GitHub Actions и Linux-сервер с Bash, Docker, современным Docker Compose (`up --wait`), `flock`, `tar` и `sha256sum`. Для сборки желательно 2 CPU и 4 GB RAM. GitHub-hosted runner должен иметь доступ к SSH сервера; серверу нужен исходящий доступ к Docker Hub, npm, PyPI и GitHub для зависимостей.
+Конфигурация рассчитана на GitHub Actions и Linux-сервер с Bash, Docker, современным Docker Compose (`up --wait`), `flock`, `tar` и `sha256sum`. Сборки выполняются на GitHub-hosted runner (`ubuntu-24.04`, Linux amd64); сервер ничего не компилирует. Runner должен иметь доступ к SSH сервера, а сервер — к GHCR для скачивания образов. Сервер должен быть x86_64/amd64; для ARM64 нужно сначала изменить архитектуру CI-сборки, иначе образы не запустятся.
 
 ## Что запускается
 
@@ -9,7 +9,14 @@
 - Push в `main` после merge: те же проверки, затем деплой проверенного SHA. Прямой push в `main` тоже запускает деплой, поэтому запретите его правилом ветки.
 - Ручной Run workflow: проверки; деплой только при выборе `main` и только если SHA ещё соответствует последнему коммиту `main`.
 
-Actions забирает приватный репозиторий встроенным `GITHUB_TOKEN`, упаковывает коммит и передаёт его по SSH. На сервере не нужны GitHub PAT, deploy key для репозитория или доступ к registry приватных образов. `.env` хранится только на сервере. Новые образы собираются до замены контейнеров. После `up --wait` переключается ссылка `current`; при неудаче скрипт пробует поднять предыдущие образы и оставляет job красным. Старые релизы/образы автоматически не удаляются.
+Actions забирает приватный репозиторий встроенным `GITHUB_TOKEN`, собирает оба образа, прогоняет тесты и только на `main` публикует их в GHCR:
+
+- `ghcr.io/OWNER/REPOSITORY/app:COMMIT_SHA`
+- `ghcr.io/OWNER/REPOSITORY/extractor:COMMIT_SHA`
+
+Имена OWNER/REPOSITORY приводятся к нижнему регистру. Workflow получает `packages: write` для публикации; отдельный PAT в Actions не нужен. Новые пакеты GHCR создаются приватными: не меняйте их visibility на public. Для уже существующих пакетов проверьте приватность и доступ репозитория в package settings. Ограничения организации на GitHub Packages могут потребовать разрешения администратора.
+
+По SSH передаются только `compose.production.yaml` и `images.env` с **digest** опубликованных образов. Исходники и Dockerfile на сервере не нужны. `.env` хранится только на сервере. Скрипт выполняет `docker compose pull` до замены сервисов, затем `up --no-build --pull never --wait`. При ошибке скачивания текущие контейнеры остаются работать. После успешного запуска переключается `current`; при неудаче скрипт пробует поднять предыдущие локальные образы и оставляет job красным. Старые релизы/образы автоматически не удаляются. Для прежних релизов со сборкой на сервере поддержан автоматический откат через их старый Compose.
 
 Это обновление одной реплики с небольшим перерывом, без гарантии zero downtime. Откат возвращает контейнеры, но не откатывает SQLite. Для несовместимых миграций нужна отдельная резервная копия и план восстановления. Обрыв питания или SIGKILL может потребовать ручного восстановления.
 
@@ -50,14 +57,24 @@ COOKIE_SECURE=true
 ANIME_DATA_VOLUME=kadr_anime-data
 ```
 
-`DATABASE_PATH` и внутренний адрес экстрактора задаёт Compose. Суперадмин и пароли автоматически не создаются. После первого успешного деплоя:
+`DATABASE_PATH` и внутренний адрес экстрактора задаёт Compose. Перед первым деплоем войдите в GHCR **от пользователя deploy**, не от root:
+
+```sh
+sudo -iu deploy
+read -r -s -p 'GHCR read:packages token: ' ghcr_token; printf '\n'
+printf '%s' "$ghcr_token" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+unset ghcr_token
+```
+
+Используйте Personal access token **classic** с `read:packages` от аккаунта, имеющего доступ к обоим приватным пакетам. При SSO авторизуйте токен для организации. Без credential helper Docker хранит credentials в `~/.docker/config.json`; оставьте файл доступным только deploy. Не добавляйте токен в `.env`, git или аргументы команд. При истечении токена повторите login. Документация: [аутентификация GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+Суперадмин и пароли автоматически не создаются. После первого успешного деплоя:
 
 ```sh
 cd /opt/kadr/current
-export DEPLOY_SHA="$(basename "$(readlink -f /opt/kadr/current)")"
 export DEPLOY_PROJECT=kadr
-docker compose --project-name "$DEPLOY_PROJECT" --env-file /opt/kadr/shared/.env \
-  -f compose.yaml -f compose.production.yaml exec app node scripts/admin.mjs create your_username
+docker compose --project-name "$DEPLOY_PROJECT" --env-file /opt/kadr/shared/.env --env-file images.env \
+  -f compose.production.yaml exec app node scripts/admin.mjs create your_username
 ```
 
 ### Если сайт уже работает через Compose
@@ -126,7 +143,7 @@ git push origin dev
 
 ## Ручной откат
 
-Выберите SHA предыдущего **успешного** релиза из `/opt/kadr/releases`, для которого остались образы:
+Для релизов GHCR выберите SHA предыдущего **успешного** релиза из `/opt/kadr/releases`, для которого остались образы:
 
 ```sh
 cd /opt/kadr
@@ -136,8 +153,8 @@ export DEPLOY_PROJECT=kadr
 flock deploy.lock bash -c '
   set -e
   docker compose --project-name "$DEPLOY_PROJECT" --env-file /opt/kadr/shared/.env \
-    -f "releases/$DEPLOY_SHA/compose.yaml" -f "releases/$DEPLOY_SHA/compose.production.yaml" \
-    up -d --no-build --wait --wait-timeout 180
+    --env-file "releases/$DEPLOY_SHA/images.env" -f "releases/$DEPLOY_SHA/compose.production.yaml" \
+    up -d --no-build --pull never --wait --wait-timeout 180
   ln -sfn "/opt/kadr/releases/$DEPLOY_SHA" current.next
   mv -Tf current.next current
 '
@@ -152,6 +169,6 @@ bash -n scripts/deploy.sh
 python3 -m unittest discover -s tests -p 'test_deploy.py'
 ```
 
-Тесты скрипта рассчитаны на Linux/GNU coreutils, подменяют только Docker и flock и проверяют успех, ошибку сборки, неудачную проверку здоровья, откат и checksum. Они не подтверждают реальный SSH-доступ или настройки конкретного VPS.
+Тесты скрипта рассчитаны на Linux/GNU coreutils, подменяют только Docker и flock и проверяют успех, ошибку скачивания, отсутствие сборки на сервере, неудачную проверку здоровья, откат и checksum. Они не подтверждают реальный SSH-доступ или настройки конкретного VPS.
 
 Документация: [GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax), [Docker Compose up](https://docs.docker.com/reference/cli/docker/compose/up/).

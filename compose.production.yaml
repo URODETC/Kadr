@@ -1,9 +1,50 @@
-# Overlay for scripts/deploy.sh; the base Compose also remains usable locally.
+# Standalone production configuration: no build context on the server.
 services:
   app:
-    image: ${DEPLOY_PROJECT:?Set DEPLOY_PROJECT}-app:${DEPLOY_SHA:?Set DEPLOY_SHA}
+    image: ${APP_IMAGE:?Set APP_IMAGE in release images.env}
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      DATABASE_PATH: /app/data/anime.sqlite
+      EXTRACTOR_URL: http://extractor:8000
+    depends_on:
+      extractor:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - anime-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
   extractor:
-    image: ${DEPLOY_PROJECT:?Set DEPLOY_PROJECT}-extractor:${DEPLOY_SHA:?Set DEPLOY_SHA}
+    image: ${EXTRACTOR_IMAGE:?Set EXTRACTOR_IMAGE in release images.env}
+    restart: unless-stopped
+    init: true
+    # Private service: deliberately no ports published on the host.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 volumes:
   anime-data:
     external: true
