@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Invoked over SSH with the verified archive already in incoming/.
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 root=${1:?deployment root required}
 sha=${2:?commit SHA required}
@@ -35,7 +35,9 @@ compose() {
 }
 compose "$release" config --quiet
 # Build failures leave the running release alone.
-compose "$release" build
+if [[ "$previous" != "$release" ]]; then
+  compose "$release" build
+fi
 rollback() {
   local status=$?
   trap - ERR HUP INT TERM

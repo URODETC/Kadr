@@ -31,6 +31,10 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+      - name: Workflow and shell validation
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 .github/workflows/ci-cd.yml
+          docker run --rm --entrypoint shellcheck -v "$PWD:/repo:ro" -w /repo rhysd/actionlint@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 scripts/deploy.sh
       - name: Deployment script tests
         run: python3 -m unittest discover -s tests -p 'test_deploy.py'
       - name: Build production images
@@ -89,5 +93,7 @@ jobs:
           target="$DEPLOY_USER@$DEPLOY_HOST"
           git archive --format=tar.gz "$GITHUB_SHA" > "$archive"
           checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
+          # shellcheck disable=SC2029 # Client expansion is intentional; every interpolated value is validated above.
           ssh "${ssh_opts[@]}" "$target" "umask 077; mkdir -p '$DEPLOY_ROOT/incoming'; cat > '$DEPLOY_ROOT/incoming/$GITHUB_SHA.tar.gz'" < "$archive"
+          # shellcheck disable=SC2029 # Client expansion is intentional; every interpolated value is validated above.
           ssh "${ssh_opts[@]}" "$target" "bash -s -- '$DEPLOY_ROOT' '$GITHUB_SHA' '$checksum' '$DEPLOY_PROJECT'" < scripts/deploy.sh
