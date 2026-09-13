@@ -44,3 +44,12 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+/data/
+/build/
+*.tsbuildinfo
+!.env.example
+
+__pycache__/
+*.pyc
+/extractor/.venv/

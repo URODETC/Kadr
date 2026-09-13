@@ -1,0 +1,93 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Deployment script tests
+        run: python3 -m unittest discover -s tests -p 'test_deploy.py'
+      - name: Build production images
+        run: |
+          docker build -t kadr-anime:local .
+          docker build -t kadr-extractor:local extractor
+      - name: Extractor tests
+        run: docker run --rm -v "$PWD/extractor/test_service.py:/service/test_service.py:ro" kadr-extractor:local python -m unittest test_service
+      - name: Private Docker network smoke test
+        run: python3 tests/docker-extractor-check.py
+
+  deploy:
+    name: Deploy main
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    concurrency:
+      group: production-ssh
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Transfer and deploy checked commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT || '/opt/kadr' }}
+          DEPLOY_PROJECT: ${{ vars.DEPLOY_PROJECT || 'kadr' }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo 'A newer main commit exists; skipping this deployment.'
+            exit 0
+          fi
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ]] && (( DEPLOY_PORT > 0 && DEPLOY_PORT < 65536 ))
+          [[ "$DEPLOY_ROOT" =~ ^/[a-zA-Z0-9_/-]+$ && "$DEPLOY_ROOT" != / && "$DEPLOY_ROOT" != */ ]]
+          [[ "$DEPLOY_PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+          [[ -n "$DEPLOY_SSH_KEY" && -n "$DEPLOY_KNOWN_HOSTS" ]]
+          umask 077
+          ssh_dir=$(mktemp -d)
+          archive=$(mktemp)
+          trap 'rm -rf "$ssh_dir"; rm -f "$archive"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh_opts=(-i "$ssh_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          target="$DEPLOY_USER@$DEPLOY_HOST"
+          git archive --format=tar.gz "$GITHUB_SHA" > "$archive"
+          checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
+          ssh "${ssh_opts[@]}" "$target" "umask 077; mkdir -p '$DEPLOY_ROOT/incoming'; cat > '$DEPLOY_ROOT/incoming/$GITHUB_SHA.tar.gz'" < "$archive"
+          ssh "${ssh_opts[@]}" "$target" "bash -s -- '$DEPLOY_ROOT' '$GITHUB_SHA' '$checksum' '$DEPLOY_PROJECT'" < scripts/deploy.sh

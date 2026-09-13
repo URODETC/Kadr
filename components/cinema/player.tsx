@@ -1,52 +1,48 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import type { Playback } from '@/lib/cinema/types';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
+import type {Playback} from '@/lib/cinema/types';
+import {getProgress,clock,type WatchIdentity} from '@/lib/watch';
+import {playbackError} from '@/lib/cinema/player-errors';
 import type Shaka from 'shaka-player/dist/shaka-player.ui';
 import 'shaka-player/dist/controls.css';
-export function Player({data,storageKey,onProgress,onEnded}:{data:Playback;storageKey:string;onProgress:(time:number,duration:number)=>void;onEnded:()=>void}){
- const video=useRef<HTMLVideoElement>(null),container=useRef<HTMLDivElement>(null);
- const [status,setStatus]=useState('Проверяем качество и дорожки…');const [error,setError]=useState('');const [retry,setRetry]=useState(0);
- const callbacks=useRef({onProgress,onEnded});callbacks.current={onProgress,onEnded};
- useEffect(()=>{
-  if(!video.current||!container.current)return;
-  const element=video.current;let disposed=false;let ui:Shaka.ui.Overlay|undefined;let player:Shaka.Player|undefined;let lastSave=0;
-  setError('');setStatus('Проверяем качество и дорожки…');
-  const handleTime=()=>{if(element.currentTime-lastSave>=5||element.currentTime<lastSave){lastSave=element.currentTime;callbacks.current.onProgress(element.currentTime,element.duration);}};
-  const save=()=>callbacks.current.onProgress(element.currentTime,element.duration);
-  const ended=()=>callbacks.current.onEnded();
-  element.addEventListener('timeupdate',handleTime);element.addEventListener('pause',save);element.addEventListener('ended',ended);
-  const run=async()=>{
-   try{
-    const mod=await import('shaka-player/dist/shaka-player.ui');const shaka=mod.default;
-    if(disposed)return;
-    shaka.polyfill.installAll();
-    if(!shaka.Player.isBrowserSupported())throw new Error('Этот браузер не поддерживает потоковый плеер. Попробуйте актуальный Chrome, Firefox или Safari.');
-    player=new shaka.Player();await player.attach(element);if(disposed){await player.destroy();return;}
-    player.configure({preferredAudioLanguage:'ru',preferredTextLanguage:'ru',restrictions:{minWidth:1920},abr:{restrictions:{minWidth:1920}},streaming:{bufferingGoal:20,rebufferingGoal:2,preferNativeHls:false}});
-    ui=new shaka.ui.Overlay(player,container.current!,element);
-    ui.configure({controlPanelElements:['play_pause','time_and_duration','spacer','mute','volume','overflow_menu','fullscreen'],overflowMenuButtons:['quality','language','captions','playback_rate','picture_in_picture'],trackLabelFormat:shaka.ui.Overlay.TrackLabelFormat.LABEL_OR_LANGUAGE,textTrackLabelFormat:shaka.ui.Overlay.TrackLabelFormat.LABEL_OR_LANGUAGE,seekBarColors:{base:'#ffffff30',buffered:'#ffffff60',played:'#d7ef75'},showUnbufferedStart:false});
-    ui.getControls()?.getLocalization()?.changeLocale(['ru']);
-    player.addEventListener('error',()=>{if(!disposed){element.pause();setError('Не удалось воспроизвести поток. Возможно, источник недоступен, отсутствует 1080p или браузер не поддерживает кодек.');}});
-    let resume=0;try{resume=Number(JSON.parse(localStorage.getItem(storageKey)||'{}').time)||0;}catch{}
-    await player.load(data.sources[0].url,resume||undefined,data.sources[0].mime);
-    if(disposed)return;
-    const variants=player.getVariantTracks();
-    if(!variants.some(t=>(t.width??0)>=1920)){await player.unload();throw new Error('У этого источника нет 1080p. Воспроизведение остановлено: качество ниже вашего минимума.');}
-    if(!data.demo){
-     const tracks=player.getAudioTracks();
-     const russian=tracks.filter(t=>/^(ru|rus)(-|$)/i.test(t.language)||/рус/i.test(t.label??''));
-     const original=data.audios.find(a=>a.original);
-     const hasOriginal=original&&tracks.some(t=>/orig|оригинал/i.test(t.label??'')||(original.lang!=='und'&&t.language===original.lang));
-     if(!russian.length||!hasOriginal){await player.unload();throw new Error('В потоке не подтверждены русская и оригинальная дорожки.');}
-    }
-    let subtitleFailures=0;
-    for(const sub of data.subtitles){if(disposed)return;try{await player.addTextTrackAsync(sub.url,sub.lang,'subtitles',sub.mime,undefined,sub.label);}catch{subtitleFailures++;}}
-    if(!data.demo&&!player.getTextTracks().length){await player.unload();throw new Error('Субтитры не загрузились. Попробуйте позже.');}
-    if(!disposed){const max=Math.max(...variants.map(t=>t.width??0));setStatus(`${max>=3840?'4K':'1080p'} · Озвучки и субтитры — в настройках плеера${subtitleFailures?' · Часть субтитров недоступна':''}`);}
-   }catch(e){if(!disposed){element.pause();setError(e instanceof Error?e.message:'У источника нет доступного потока 1080p. Попробуйте другой фильм.');setStatus('');}}
-  };
-  void run();
-  return()=>{disposed=true;save();element.removeEventListener('timeupdate',handleTime);element.removeEventListener('pause',save);element.removeEventListener('ended',ended);void(async()=>{if(ui)await ui.destroy();if(player)await player.destroy();})();};
- },[data,storageKey,retry]);
- return <><div className="player-shell"><div ref={container}><video ref={video} playsInline crossOrigin="anonymous" aria-label="Видеоплеер"/></div></div>{error?<div className="error" role="alert">{error}<div><button className="filter" onClick={()=>setRetry(v=>v+1)}>Повторить</button></div></div>:<p className="player-status" role="status">{status}</p>}</>;
+type Props={data:Playback|null;storageKey:string;watch?:WatchIdentity;controls?:ReactNode;title?:string;loading?:string;externalError?:string;onProgress?:(time:number,duration:number)=>void;onEnded:()=>void;onNext?:()=>void;autoPlay?:boolean};
+export function Player({data,storageKey,watch,controls,title,loading,externalError,onProgress,onEnded,onNext,autoPlay=false}:Props){
+ const container=useRef<HTMLDivElement>(null),video=useRef<HTMLVideoElement>(null),engine=useRef<Shaka.Player|null>(null);
+ const [error,setError]=useState(''),[recovery,setRecovery]=useState(''),[retry,setRetry]=useState(0),[quality,setQuality]=useState(0),[menu,setMenu]=useState(false),[pending,setPending]=useState(false),[sync,setSync]=useState(''),[watched,setWatched]=useState(false),[ready,setReady]=useState(false),[resumeAt,setResumeAt]=useState(0);
+ const callbacks=useRef({onProgress,onEnded,onNext,watch});callbacks.current={onProgress,onEnded,onNext,watch};
+ const [initialized,setInitialized]=useState(false);
+ const revision=useRef(0),blocked=useRef(false),saveFn=useRef<(state?:'auto'|'watched'|'unwatched')=>void>(()=>{}),loadPosition=useRef(0),endedRef=useRef(false);
+ // Each mounted episode owns a serialized write queue and its revision. Old devices cannot overwrite newer progress.
+ useEffect(()=>{let active=true,inflight=false;let queued:{position:number;duration:number;state:'auto'|'watched'|'unwatched'}|null=null;const identity=watch;let rev=0;let isBlocked=false;
+  setReady(false);setResumeAt(0);setWatched(false);setSync('');blocked.current=false;endedRef.current=false;
+  const flush=async()=>{if(inflight||isBlocked||!queued||!identity)return;inflight=true;const value=queued;queued=null;try{const r=await fetch('/api/progress',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({...identity,sourceLabel:callbacks.current.watch?.sourceLabel||identity.sourceLabel,...value,revision:rev})});const result=await r.json();if(r.status===409){isBlocked=true;blocked.current=true;if(active)setSync('Просмотр изменён на другом устройстве.');}else if(!r.ok)throw new Error();else{rev=result.item.revision;revision.current=rev;if(active){setWatched(result.item.watched);setSync('');}window.dispatchEvent(new Event('watch-progress'));}}catch{if(active)setSync('Не сохранено — проверьте соединение.');}finally{inflight=false;if(queued&&!isBlocked)void flush();}};
+  saveFn.current=(state='auto')=>{const e=video.current;if(!e||!Number.isFinite(e.duration)||e.duration<=0||(!e.currentTime&&state==='auto'))return;if(identity){queued={position:e.currentTime,duration:e.duration,state};void flush();}callbacks.current.onProgress?.(e.currentTime,e.duration);};
+  const abort=new AbortController();(async()=>{try{if(identity){const rows=await getProgress(identity.titleKey,abort.signal);if(!active)return;const row=rows.find(r=>r.episodeKey===identity.episodeKey);rev=row?.revision||0;revision.current=rev;loadPosition.current=row&&!row.watched?row.position:0;setResumeAt(loadPosition.current);setWatched(!!row?.watched);}else{let local=0;try{local=JSON.parse(localStorage.getItem(storageKey)||'{}').time||0;}catch{}loadPosition.current=local;}if(active)setReady(true);}catch{if(active)setSync('Не удалось загрузить прогресс. Повторите подключение.');}})();
+  const hide=()=>{if(document.visibilityState==='hidden')saveFn.current();};const unload=()=>saveFn.current();document.addEventListener('visibilitychange',hide);window.addEventListener('pagehide',unload);
+  return()=>{saveFn.current();active=false;abort.abort();document.removeEventListener('visibilitychange',hide);window.removeEventListener('pagehide',unload);};
+ // Source changes within one episode must not reset the progress identity.
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[storageKey,retry]);
+ // Keep one Shaka overlay per episode. Changing a stream uses load(), not UI teardown.
+ useEffect(()=>{const element=video.current;if(!element||!container.current)return;let disposed=false;let player:Shaka.Player|undefined,ui:Shaka.ui.Overlay|undefined;let last=0;
+  const playing=()=>{setRecovery('');};const time=()=>{if(Math.abs(element.currentTime-last)>=10){last=element.currentTime;setResumeAt(0);saveFn.current();}};const pause=()=>saveFn.current();const ended=()=>{if(endedRef.current)return;endedRef.current=true;saveFn.current('watched');callbacks.current.onEnded();};element.addEventListener('playing',playing);element.addEventListener('timeupdate',time);element.addEventListener('pause',pause);element.addEventListener('ended',ended);
+  void(async()=>{try{const shaka=(await import('shaka-player/dist/shaka-player.ui')).default;if(disposed)return;shaka.polyfill.installAll();player=new shaka.Player();await player.attach(element);if(disposed){await player.destroy();return;}engine.current=player;player.configure({preferredAudioLanguage:'ru',preferredTextLanguage:'ru',streaming:{bufferingGoal:30,rebufferingGoal:3,lowLatencyMode:false,stallSkip:0,preferNativeHls:!!element.canPlayType('application/vnd.apple.mpegurl')}});ui=new shaka.ui.Overlay(player,container.current!,element);ui.configure({controlPanelElements:['play_pause','time_and_duration','spacer','mute','volume','overflow_menu','fullscreen'],overflowMenuButtons:['quality','language','captions','playback_rate','picture_in_picture'],seekBarColors:{base:'#ffffff30',buffered:'#ffffff60',played:'#d7ef75'},keyboardSeekDistance:10,seekOnTaps:true});ui.getControls()?.getLocalization()?.changeLocale(['ru']);player.addEventListener('error',event=>{if(disposed)return;const issue=playbackError((event as unknown as {detail:unknown}).detail);if(!issue)return;if(issue.fatal){setRecovery('');setError(issue.message);}else setRecovery(issue.message);});setInitialized(true);}catch(e){if(!disposed)setError(e instanceof Error?e.message:'Не удалось открыть плеер.');}})();
+  return()=>{saveFn.current();disposed=true;engine.current=null;element.removeEventListener('playing',playing);element.removeEventListener('timeupdate',time);element.removeEventListener('pause',pause);element.removeEventListener('ended',ended);if(ui)void ui.destroy();else if(player)void player.destroy();};
+ },[]);
+ useEffect(()=>{const player=engine.current,element=video.current;if(!initialized||!player||!element||!data||!ready)return;let disposed=false;setPending(true);setError('');setRecovery('');
+  void(async()=>{try{const s=data.sources[quality]||data.sources[0];await player.load(s.url,loadPosition.current||undefined,s.mime);if(disposed)return;for(const sub of data.subtitles){if(disposed)return;await player.addTextTrackAsync(sub.url,sub.lang,'subtitles',sub.mime,undefined,sub.label).catch(()=>{});}if(!disposed&&autoPlay)void element.play().catch(()=>{});}catch(e){if(!disposed){const issue=playbackError(e);if(issue)setError(issue.message);}}finally{if(!disposed)setPending(false);}})();
+  return()=>{disposed=true;saveFn.current();if(Number.isFinite(element.currentTime))loadPosition.current=element.currentTime;element.pause();};
+ },[data,ready,quality,retry,autoPlay,initialized]);
+ const restart=()=>{loadPosition.current=0;if(video.current)video.current.currentTime=0;endedRef.current=false;saveFn.current('unwatched');setWatched(false);setResumeAt(0);};
+ return <div className="watch-player" ref={container} tabIndex={0} aria-label={title||'Видеоплеер'}>
+  <video ref={video} playsInline crossOrigin="anonymous" aria-label="Видео"/>
+  <div className="watch-top"><span>{title}</span><div>{onNext&&<button aria-label="Следующая серия" onClick={()=>{saveFn.current();onNext();}}>Следующая →</button>}<button aria-expanded={menu} onClick={()=>setMenu(v=>!v)}>☷ Настройки</button></div></div>
+  {menu&&<div className="watch-settings" onKeyDown={e=>e.stopPropagation()}><div className="watch-setting-fields">{controls}{data&&<label>Качество<select value={quality} onChange={e=>{loadPosition.current=video.current?.currentTime||0;setQuality(Number(e.target.value));}}>{data.sources.map((s,i)=><option key={i} value={i}>{s.quality?`${s.quality}p`:'Авто'}</option>)}</select></label>}</div><div className="watch-actions"><button disabled={!data} onClick={restart}>С начала</button><button disabled={!data} onClick={()=>watched?restart():saveFn.current('watched')}>{watched?'✓ Просмотрено — снять':'Отметить просмотренной'}</button><button onClick={()=>setMenu(false)}>Готово</button></div></div>}
+  {!data&&!menu&&<div className="watch-empty"><p>{loading||externalError||'Выберите серию и перевод'}</p><button className="primary" onClick={()=>setMenu(true)}>Открыть настройки</button></div>}
+  {(error||externalError)&&data&&<div className="watch-message" role="alert">{error||externalError}<button onClick={()=>{loadPosition.current=video.current?.currentTime||0;setRetry(v=>v+1);}}>Повторить</button><button onClick={()=>setMenu(true)}>Настройки</button></div>}
+  {recovery&&!error&&!pending&&<p className="watch-loading" role="status">{recovery}</p>}
+  {data&&pending&&!error&&<p className="watch-loading" role="status">Загрузка…</p>}
+  {sync&&<div className="watch-sync" role="status">{sync}<button onClick={()=>{loadPosition.current=video.current?.currentTime||0;setRetry(v=>v+1);}}>Загрузить сохранённое</button></div>}
+  {resumeAt>0&&data&&!pending&&!menu&&<button className="watch-resume" onClick={restart}>Продолжено с {clock(resumeAt)} · начать заново</button>}
+ </div>;
 }

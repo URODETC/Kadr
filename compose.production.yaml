@@ -1,0 +1,10 @@
+# Overlay for scripts/deploy.sh; the base Compose also remains usable locally.
+services:
+  app:
+    image: ${DEPLOY_PROJECT:?Set DEPLOY_PROJECT}-app:${DEPLOY_SHA:?Set DEPLOY_SHA}
+  extractor:
+    image: ${DEPLOY_PROJECT:?Set DEPLOY_PROJECT}-extractor:${DEPLOY_SHA:?Set DEPLOY_SHA}
+volumes:
+  anime-data:
+    external: true
+    name: ${ANIME_DATA_VOLUME:?Set ANIME_DATA_VOLUME in shared/.env}

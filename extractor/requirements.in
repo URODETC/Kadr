@@ -1,0 +1,3 @@
+anicli-api @ https://github.com/vypivshiy/anicli-api/archive/ab79153c504dd1e6877749d64c978c362a2936a2.zip
+fastapi>=0.115,<1
+uvicorn>=0.34,<1

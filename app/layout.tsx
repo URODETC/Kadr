@@ -2,11 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Кадр — ваш личный кинозал",
-  description: "Фильмы и сериалы. Прямое потоковое воспроизведение.",
-  other: {
-    "codex-preview": "development",
-  },
+  title: "Кадр / anime",
+  description: "Закрытый аниме-клуб.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
