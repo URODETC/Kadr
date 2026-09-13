@@ -242,3 +242,12 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 
 .watch-settings {box-sizing:border-box;padding:12px;}
 .watch-actions {position:sticky;bottom:-12px;background:#17201a;padding:8px 0;margin-top:8px;}
+
+.invite-panel {margin:24px 0;padding:20px;background:#18221c;border:1px solid #ffffff18;border-radius:12px;}
+.invite-panel>p {margin-top:12px;font-size:14px;}
+.invite-link {display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:20px;}
+.invite-link label {display:grid;gap:8px;flex:1;min-width:0;font-size:14px;}
+.invite-link p {flex-basis:100%;font-size:13px;}
+.invite-row {display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-top:16px;font-size:14px;}
+.invite-row small {color:#a7b1aa;flex:1;}
+@media(max-width:650px){.invite-panel{padding:14px;}.invite-link label{flex-basis:100%;}.invite-row{gap:8px;}}

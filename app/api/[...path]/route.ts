@@ -1,5 +1,6 @@
+import {createInvitation,listInvitations,revokeInvitation,checkInvitation,acceptInvitation} from '@/lib/server/invitations.mjs';
 import {readProgress,writeProgress} from '@/lib/server/progress';
-import { currentUser, sameOrigin, db, allowAttempt, verifyPassword, newSession, cookie, removeSession, createUser, hashPassword } from '@/lib/server/auth.mjs';
+import { currentUser, sameOrigin, db, allowAttempt, verifyPassword, newSession, cookie, removeSession, hashPassword } from '@/lib/server/auth.mjs';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const json=(data:unknown,status=200,headers:Record<string,string>={})=>Response.json(data,{status,headers:{'Cache-Control':'private, no-store',...headers}});
@@ -25,6 +26,15 @@ async function handle(request:Request){
    db().prepare('DELETE FROM attempts WHERE key=?').run('login:'+name);
    return json({ok:true},200,{'Set-Cookie':cookie(newSession(row.id))});
   }
+  if((path==='auth/invitation'||path==='auth/register')&&method==='POST'){
+   if(!allowAttempt('global-'+path,100))return json({error:'Слишком много попыток. Попробуйте через 15 минут.'},429);
+   const invite=checkInvitation(body.token);
+   if(!invite)return json({error:'Приглашение недействительно, истекло или уже использовано.'},410);
+   if(path==='auth/invitation')return json({expiresAt:invite.expires_at});
+   const session=await acceptInvitation(body.token,body.username,body.password);
+   if(!session)return json({error:'Приглашение недействительно, истекло или уже использовано.'},410);
+   return json({ok:true},201,{'Set-Cookie':cookie(session)});
+  }
   const user=currentUser(request) as {id:number;username:string;role:string}|null;
   if(!user)return json({error:'Требуется вход.'},401);
   if(path==='progress'){
@@ -45,10 +55,25 @@ async function handle(request:Request){
   }
   if(path==='auth/me'&&method==='GET')return json(user);
   if(path==='auth/logout'&&method==='POST'){removeSession(request);return json({ok:true},200,{'Set-Cookie':cookie('',0)});}
+  if(path==='invitations'){
+   if(user.role!=='admin')return json({error:'Доступ только для суперадминистратора.'},403);
+   if(method==='GET')return json(listInvitations());
+   if(method==='POST'){
+    if(!allowAttempt('invite-create:'+user.id,20))return json({error:'Слишком много приглашений. Попробуйте через 15 минут.'},429);
+    const invite=createInvitation(user.id);
+    return json({id:invite.id,expiresAt:invite.expiresAt,url:new URL('/register',process.env.APP_ORIGIN).href+'#token='+invite.token},201);
+   }
+   if(method==='DELETE'){
+    const id=Number(body.id);
+    if(!Number.isSafeInteger(id)||id<1)return json({error:'Неверное приглашение.'},400);
+    return revokeInvitation(id)?json({ok:true}):json({error:'Приглашение уже использовано или отозвано.'},409);
+   }
+   return json({error:'Метод недоступен.'},405);
+  }
   if(path==='users'){
    if(user.role!=='admin')return json({error:'Доступ только для суперадминистратора.'},403);
    if(method==='GET')return json(db().prepare('SELECT id,username,role,created_at FROM users ORDER BY id').all());
-   if(method==='POST'){await createUser(body.username,body.password);return json({ok:true},201);}
+   if(method==='POST')return json({error:'Создайте ссылку-приглашение.'},405);
    const id=Number(body.id);
    const target=db().prepare('SELECT id,role FROM users WHERE id=?').get(id);
    if(!target)return json({error:'Пользователь не найден.'},404);

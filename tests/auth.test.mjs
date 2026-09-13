@@ -25,7 +25,7 @@ before(async()=>{
 after(async()=>{if(child){if(child.exitCode===null){child.kill('SIGTERM');await new Promise(r=>child.once('exit',r));}}if(extractorMock)await new Promise(r=>extractorMock.close(r));await rm(dir,{recursive:true,force:true});});
 test('anonymous users see only login; forged auth headers do not help',async()=>{
  for(const path of ['/','/admin','/credits']){const r=await req(path);assert.equal(r.status,307);assert.equal(new URL(r.headers.get('location'),base).pathname,'/login');}
- for(const path of ['/api/anime','/api/anime/10292','/api/users','/api/auth/me','/api/catalog','/api/progress','/api/extractor/providers','/api/extractor/search/animego'])assert.equal((await req(path)).status,401);
+ for(const path of ['/api/anime','/api/anime/10292','/api/users','/api/auth/me','/api/catalog','/api/progress','/api/invitations','/api/extractor/providers','/api/extractor/search/animego'])assert.equal((await req(path)).status,401);
  const fake=await fetch(base+'/api/users',{headers:{'oai-authenticated-user-id':'admin',Cookie:'anime_session='+'a'.repeat(64)}});assert.equal(fake.status,401);
  const login=await(await req('/login')).text();assert.ok(!login.includes('История о перекуре'));
 });
@@ -34,14 +34,38 @@ test('login rejects cross-origin and incorrect credentials; session cookie is ht
  assert.equal((await req('/api/auth/login',{method:'POST',body:{username:'owner',password:'wrong'}})).status,401);
  const r=await req('/api/auth/login',{method:'POST',body:{username:'OWNER',password}});assert.equal(r.status,200);const c=r.headers.get('set-cookie');assert.match(c,/HttpOnly/);assert.match(c,/SameSite=Strict/);adminCookie=c.split(';')[0];assert.equal((await req('/',{cookie:adminCookie})).status,200);
 });
-test('only admin creates accounts and supplied role is ignored',async()=>{
- let r=await req('/api/users',{method:'POST',cookie:adminCookie,body:{username:'friend',password,role:'admin'}});assert.equal(r.status,201);
- r=await req('/api/auth/login',{method:'POST',body:{username:'friend',password}});assert.equal(r.status,200);friendCookie=r.headers.get('set-cookie').split(';')[0];
+test('only admin issues invitations; friends choose credentials and cannot choose roles',async()=>{
+ assert.equal((await req('/api/users',{method:'POST',cookie:adminCookie,body:{username:'friend',password}})).status,405);
+ const created=await req('/api/invitations',{method:'POST',cookie:adminCookie,body:{}});assert.equal(created.status,201);
+ const invite=await created.json();assert.ok(invite.url.startsWith(base+'/register#token='));
+ const token=new URLSearchParams(new URL(invite.url).hash.slice(1)).get('token');
+ assert.equal((await req('/api/auth/invitation',{method:'POST',body:{token}})).status,200);
+ // Checking a link must not consume it; neither may an invalid form or a taken name.
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token,username:'friend',password:'short'}})).status,400);
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token,username:'owner',password}})).status,409);
+ const r=await req('/api/auth/register',{method:'POST',body:{token,username:'friend',password,role:'admin'}});assert.equal(r.status,201);friendCookie=r.headers.get('set-cookie').split(';')[0];
  assert.equal((await(await req('/api/auth/me',{cookie:friendCookie})).json()).role,'user');
- assert.equal((await req('/api/users',{cookie:friendCookie})).status,403);
- assert.equal((await req('/api/users',{method:'POST',cookie:friendCookie,body:{username:'intruder',password}})).status,403);
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token,username:'another',password}})).status,410);
+ assert.equal((await req('/api/auth/invitation',{method:'POST',body:{token}})).status,410);
+ for(const path of ['/api/users','/api/invitations'])assert.equal((await req(path,{cookie:friendCookie})).status,403);
+ assert.equal((await req('/api/invitations',{method:'POST',cookie:friendCookie,body:{}})).status,403);
  assert.equal((await req('/admin',{cookie:friendCookie})).status,307);
- assert.equal((await req('/api/users',{method:'POST',cookie:adminCookie,body:{username:'friend',password}})).status,409);
+ const listed=await req('/api/invitations',{cookie:adminCookie});assert.equal(listed.status,200);const list=await listed.json();assert.equal(list[0].used_by,'friend');assert.ok(!JSON.stringify(list).includes(token));assert.ok(!('hash' in list[0]));
+});
+test('invitations require origin, cannot be revoked by friends, expire and are one-use under concurrency',async()=>{
+ async function issue(){const r=await req('/api/invitations',{method:'POST',cookie:adminCookie,body:{}});const d=await r.json();return {...d,token:new URLSearchParams(new URL(d.url).hash.slice(1)).get('token')};}
+ const revoked=await issue();
+ assert.equal((await req('/api/invitations',{method:'DELETE',cookie:friendCookie,body:{id:revoked.id}})).status,403);
+ assert.equal((await req('/api/auth/register',{method:'POST',origin:'https://evil.example',body:{token:revoked.token,username:'revoked',password}})).status,403);
+ assert.equal((await req('/api/invitations',{method:'DELETE',cookie:adminCookie,body:{id:revoked.id}})).status,200);
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token:revoked.token,username:'revoked',password}})).status,410);
+ const expired=await issue();const auth=await import('../lib/server/auth.mjs');auth.db().prepare('UPDATE invitations SET expires_at=0 WHERE id=?').run(expired.id);
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token:expired.token,username:'expired',password}})).status,410);
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token:'a'.repeat(64),username:'unguested',password}})).status,410);
+ const concurrent=await issue();const results=await Promise.all(['race_one','race_two'].map(username=>req('/api/auth/register',{method:'POST',body:{token:concurrent.token,username,password}})));
+ assert.deepEqual(results.map(r=>r.status).sort(),[201,410]);
+ assert.equal(auth.db().prepare("SELECT COUNT(*) AS n FROM users WHERE username IN ('race_one','race_two')").get().n,1);
+ const stored=auth.db().prepare('SELECT hash FROM invitations WHERE id=?').get(concurrent.id);assert.notEqual(stored.hash,concurrent.token);
 });
 test('extractor bridge validates routes and forwards server-owned identity',async()=>{
  const r=await fetch(base+'/api/extractor/providers',{headers:{Cookie:friendCookie,'X-User-Id':'999'}});
