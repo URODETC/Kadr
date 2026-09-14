@@ -150,8 +150,8 @@ body { background:#101315; color:#edf0eb; }
 .login-card h1 { font-size:30px; letter-spacing:-1px; margin-top:20px; }
 .login-card p,.muted { color:#a7b1aa; line-height:1.6; }
 .login-card label,.admin-form label,.episode-controls label { display:grid; gap:8px; font-size:14px; }
-.login-card input,.anime-app input,.anime-app select,.anime-dialog select { background:#202724; border:1px solid #46534b; color:#fff; border-radius:10px; padding:12px 14px; width:100%; min-width:0; }
-.login-card input:focus,.anime-app input:focus { outline:2px solid #d7ef75; outline-offset:2px; }
+.login-card input,.anime-app input:not([type="range"]),.anime-app select,.anime-dialog select { background:#202724; border:1px solid #46534b; color:#fff; border-radius:10px; padding:12px 14px; width:100%; min-width:0; }
+.login-card input:focus,.anime-app input:not([type="range"]):focus { outline:2px solid #d7ef75; outline-offset:2px; }
 .login-card .primary { width:100%; justify-content:center; }
 .brand { font-size:28px; font-weight:750; letter-spacing:-1px; text-decoration:none; color:#edf0eb; }
 .brand span { color:#d7ef75; font-size:18px; }
@@ -303,4 +303,40 @@ button:disabled { opacity:.45; cursor:not-allowed; }
  .watch-player .watch-message {inset:8px 8px 58px;overflow:auto;font-size:12px;padding:10px;}
  .watch-player .watch-sync {bottom:58px;font-size:12px;max-height:60%;overflow:auto;}
  .watch-player:fullscreen {width:100%;margin:0;}
+}
+
+/* A thin timeline with a finger-sized target; form styles must not reach it. */
+.watch-player .shaka-seek-bar-container {
+ --shaka-touch-size:44px;
+ --shaka-track-h:4px;
+ height:4px;
+ border:0;
+ top:0;
+ margin:22px 6px;
+ z-index:0;
+}
+.watch-player input.shaka-range-element {
+ padding:0;
+ border:0;
+ border-radius:0;
+ background:transparent;
+ min-width:0;
+ touch-action:none;
+ -webkit-user-select:none;
+ user-select:none;
+}
+.watch-player input.shaka-range-element:focus {outline:none;}
+.watch-player input.shaka-range-element:focus-visible {outline:2px solid #d7ef75;outline-offset:2px;}
+.watch-player .watch-settings {overscroll-behavior:contain;}
+@media(max-width:650px),(pointer:coarse){
+ .watch-player .shaka-volume-bar-container,
+ .watch-player .shaka-mute-button,
+ .watch-player .watch-next {display:none;}
+ .anime-app .watch-player .shaka-controls-button-panel button {min-width:44px;min-height:44px;padding:0 6px;}
+ .watch-player .shaka-current-time {font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+ .watch-player .shaka-controls-container {padding-inline:max(8px,env(safe-area-inset-left)) max(8px,env(safe-area-inset-right));padding-bottom:env(safe-area-inset-bottom);}
+ .watch-player .watch-settings {bottom:56px;max-height:calc(100% - 56px);}
+}
+@media(max-width:650px){
+ .watch-player .watch-settings {height:calc(100% - 56px);}
 }
