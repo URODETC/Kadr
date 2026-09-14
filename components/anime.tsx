@@ -1,11 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import Link from 'next/link';
+import {useRouter} from 'next/navigation';
+import {watchUrl,type WatchPage} from '@/lib/watch-page';
 import HistoryShelf from "@/components/history-shelf";
 import {getProgress,clock,type WatchRecord} from "@/lib/watch";
 import ExtractorBrowser from "@/components/extractor-browser";
@@ -46,11 +43,13 @@ async function api(url: string, signal?: AbortSignal) {
   return d;
 }
 export default function Anime({
-  user,
+  user, watchPage,
 }: {
+  watchPage?: WatchPage;
   user: { id: number; username: string; role: string };
 }) {
-  const [external,setExternal]=useState(true);
+  const router=useRouter();
+  const [external,setExternal]=useState(watchPage?.provider!=="anilibria");
   const [resumeItem,setResumeItem]=useState<WatchRecord|null>(null),[records,setRecords]=useState<WatchRecord[]>([]);
   const [saved, setSaved] = useState<Release[]>([]),
     [savedOnly, setSavedOnly] = useState(false);
@@ -83,7 +82,7 @@ export default function Anime({
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [retry, setRetry] = useState(0);
-  const [selected, setSelected] = useState<Release | null>(null),
+  const [selected, setSelected] = useState<Release | null>(watchPage?.provider==="anilibria"?{id:Number(watchPage.id),name:{main:watchPage.title||"Аниме",english:""},year:0,description:"",poster:{src:""},episodes_total:0}:null),
     [episode, setEpisode] = useState<Episode | null>(null),
     [detailError, setDetailError] = useState(""),
     [detailLoading, setDetailLoading] = useState(false),
@@ -161,9 +160,9 @@ export default function Anime({
   return (
     <main className="anime-app">
       <header>
-        <a className="brand" href="/">
+        <Link className="brand" href="/">
           кадр<span> / anime</span>
-        </a>
+        </Link>
         <div className="account">
           <span>{user.username}</span>
           {user.role === "admin" && <a href="/admin">Участники</a>}
@@ -184,7 +183,7 @@ export default function Anime({
           </button>
         </div>
       </header>
-      <section className="anime-heading">
+      {!watchPage&&<><section className="anime-heading">
         <div>
           <h1>Аниме</h1>
         </div>
@@ -202,7 +201,7 @@ export default function Anime({
           />
         </label>}
       </section>
-      <HistoryShelf onResume={r=>{if(r.provider==='anilibria'){setExternal(false);setSavedOnly(false);setSelected({id:Number(r.titleKey.split(':')[1]),name:{main:r.title,english:''},year:0,description:'',poster:{src:r.poster},episodes_total:0});}else{setExternal(true);setResumeItem({...r});}}}/>
+      <HistoryShelf onResume={r=>{if(r.provider==='anilibria'){setExternal(false);setSavedOnly(false);router.push(watchUrl({provider:"anilibria",id:r.titleKey.split(":")[1],title:r.title}));}else{setExternal(true);setResumeItem({...r});}}}/>
       <div className="library-tabs">
         <button onClick={()=>setExternal(true)} aria-pressed={external}>Все источники</button>
         <button onClick={() => {setExternal(false);setSavedOnly(false);}} aria-pressed={!external&&!savedOnly}>
@@ -231,7 +230,7 @@ export default function Anime({
               <button
                 className="anime-card"
                 key={r.id}
-                onClick={() => setSelected(r)}
+                onClick={() => router.push(watchUrl({provider:"anilibria",id:String(r.id),title:r.name.main}))}
               >
                 {image(r) ? (
                   <img src={image(r)} alt="" loading="lazy" />
@@ -264,22 +263,16 @@ export default function Anime({
           )}
         </>
       )}
-      <Dialog
-        open={!!selected}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelected(null);
-            setPlayback(null);
-          }
-        }}
-      >
-        <DialogContent className="anime-dialog watch-dialog">
+      </>}
+      {watchPage&&external&&<ExtractorBrowser userId={user.id} watchPage={watchPage}/>}
+      {watchPage&&!external&&<section className="watch-page">
+        <Link className="watch-back" href="/">← В каталог</Link>
           {selected && (
             <>
-              <DialogTitle>{selected.name.main}</DialogTitle>
-              <DialogDescription>
+              <h1 className="watch-page-title">{selected.name.main}</h1>
+              <p className="muted">
                 {selected.name.english} · {selected.year}
-              </DialogDescription>
+              </p>
               {detailLoading ? (
                 <p role="status">Загружаем серии…</p>
               ) : (
@@ -295,7 +288,7 @@ export default function Anime({
                   <Player key={key} data={playback} storageKey={key}
                     watch={episode?{titleKey:`anilibria:${selected.id}`,episodeKey:episode.id,title:selected.name.main,provider:'anilibria',episode:episode.ordinal,poster:image(selected),sourceLabel:'AniLiberty'}:undefined}
                     title={episode?`Серия ${episode.ordinal}`:''} autoPlay
-                    controls={<><label>Источник<select value="anilibria" onChange={()=>{setSelected(null);setExternal(true);}}><option value="anilibria">AniLiberty</option><option value="other">Другие источники…</option></select></label><label>Сезон / релиз<select value={selected.id} disabled><option value={selected.id}>{selected.name.main}</option></select></label><label>Серия<select value={episode?.id||''} onChange={e=>{setPlayback(null);setEpisode(selected.episodes?.find(x=>x.id===e.target.value)||null);}}>{selected.episodes?.map(e=>{const row=records.find(r=>r.episodeKey===e.id);return <option key={e.id} value={e.id}>{row?.watched?'✓ ':''}Серия {e.ordinal}{row&&!row.watched?` — ${clock(row.position)}`:''}</option>;})}</select></label><label>Озвучка<select disabled><option>AniLiberty</option></select></label></>}
+                    controls={<><label>Источник<select value="anilibria" onChange={()=>{router.push("/");}}><option value="anilibria">AniLiberty</option><option value="other">Другие источники…</option></select></label><label>Сезон / релиз<select value={selected.id} disabled><option value={selected.id}>{selected.name.main}</option></select></label><label>Серия<select value={episode?.id||''} onChange={e=>{setPlayback(null);setEpisode(selected.episodes?.find(x=>x.id===e.target.value)||null);}}>{selected.episodes?.map(e=>{const row=records.find(r=>r.episodeKey===e.id);return <option key={e.id} value={e.id}>{row?.watched?'✓ ':''}Серия {e.ordinal}{row&&!row.watched?` — ${clock(row.position)}`:''}</option>;})}</select></label><label>Озвучка<select disabled><option>AniLiberty</option></select></label></>}
                     onEnded={()=>{const list=selected.episodes||[];const next=list[list.findIndex(e=>e.id===episode?.id)+1];if(next){setPlayback(null);setEpisode(next);}}}
                     onNext={selected.episodes?.some(e=>e.ordinal>(episode?.ordinal||0))?()=>{const list=selected.episodes||[];const next=list[list.findIndex(e=>e.id===episode?.id)+1];if(next){setPlayback(null);setEpisode(next);}}:undefined}/>
                   <button onClick={() => toggleSaved(selected)}>
@@ -311,8 +304,7 @@ export default function Anime({
               )}
             </>
           )}
-        </DialogContent>
-      </Dialog>
+      </section>}
 
     </main>
   );

@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {useEffect,useRef,useState,useId,type ReactNode} from 'react';
 import type {Playback} from '@/lib/cinema/types';
 import {getProgress,clock,type WatchIdentity} from '@/lib/watch';
 import {playbackError} from '@/lib/cinema/player-errors';
@@ -7,11 +7,24 @@ import type Shaka from 'shaka-player/dist/shaka-player.ui';
 import 'shaka-player/dist/controls.css';
 type Props={data:Playback|null;storageKey:string;watch?:WatchIdentity;controls?:ReactNode;title?:string;loading?:string;externalError?:string;onProgress?:(time:number,duration:number)=>void;onEnded:()=>void;onNext?:()=>void;autoPlay?:boolean};
 export function Player({data,storageKey,watch,controls,title,loading,externalError,onProgress,onEnded,onNext,autoPlay=false}:Props){
+ const menuId=useId();
+ const settingsRef=useRef<HTMLDivElement>(null);
  const container=useRef<HTMLDivElement>(null),video=useRef<HTMLVideoElement>(null),engine=useRef<Shaka.Player|null>(null);
  const [error,setError]=useState(''),[recovery,setRecovery]=useState(''),[retry,setRetry]=useState(0),[quality,setQuality]=useState(0),[menu,setMenu]=useState(false),[pending,setPending]=useState(false),[sync,setSync]=useState(''),[watched,setWatched]=useState(false),[ready,setReady]=useState(false),[resumeAt,setResumeAt]=useState(0);
  const callbacks=useRef({onProgress,onEnded,onNext,watch});callbacks.current={onProgress,onEnded,onNext,watch};
  const [initialized,setInitialized]=useState(false);
  const revision=useRef(0),blocked=useRef(false),saveFn=useRef<(state?:'auto'|'watched'|'unwatched')=>void>(()=>{}),loadPosition=useRef(0),endedRef=useRef(false);
+ useEffect(()=>{const root=container.current;if(!root)return;
+  const toggle=()=>setMenu(v=>!v);const next=()=>{saveFn.current();callbacks.current.onNext?.();};
+  root.addEventListener('episode-settings',toggle);root.addEventListener('episode-next',next);
+  return()=>{root.removeEventListener('episode-settings',toggle);root.removeEventListener('episode-next',next);};
+ },[]);
+ useEffect(()=>{const root=container.current;const button=root?.querySelector<HTMLButtonElement>('.watch-settings-toggle');
+  button?.setAttribute('aria-expanded',String(menu));button?.setAttribute('aria-controls',menuId);
+  const next=root?.querySelector<HTMLButtonElement>('.watch-next');if(next)next.hidden=!onNext;
+  if(menu)settingsRef.current?.focus();
+ },[menu,initialized,onNext,menuId]);
+ const closeMenu=()=>{setMenu(false);container.current?.querySelector<HTMLButtonElement>('.watch-settings-toggle')?.focus();};
  // Each mounted episode owns a serialized write queue and its revision. Old devices cannot overwrite newer progress.
  useEffect(()=>{let active=true,inflight=false;let queued:{position:number;duration:number;state:'auto'|'watched'|'unwatched'}|null=null;const identity=watch;let rev=0;let isBlocked=false;
   setReady(false);setResumeAt(0);setWatched(false);setSync('');blocked.current=false;endedRef.current=false;
@@ -26,7 +39,15 @@ export function Player({data,storageKey,watch,controls,title,loading,externalErr
  // Keep one Shaka overlay per episode. Changing a stream uses load(), not UI teardown.
  useEffect(()=>{const element=video.current;if(!element||!container.current)return;let disposed=false;let player:Shaka.Player|undefined,ui:Shaka.ui.Overlay|undefined;let last=0;
   const playing=()=>{setRecovery('');};const time=()=>{if(Math.abs(element.currentTime-last)>=10){last=element.currentTime;setResumeAt(0);saveFn.current();}};const pause=()=>saveFn.current();const ended=()=>{if(endedRef.current)return;endedRef.current=true;saveFn.current('watched');callbacks.current.onEnded();};element.addEventListener('playing',playing);element.addEventListener('timeupdate',time);element.addEventListener('pause',pause);element.addEventListener('ended',ended);
-  void(async()=>{try{const shaka=(await import('shaka-player/dist/shaka-player.ui')).default;if(disposed)return;shaka.polyfill.installAll();player=new shaka.Player();await player.attach(element);if(disposed){await player.destroy();return;}engine.current=player;player.configure({preferredAudioLanguage:'ru',preferredTextLanguage:'ru',streaming:{bufferingGoal:30,rebufferingGoal:3,lowLatencyMode:false,stallSkip:0,preferNativeHls:!!element.canPlayType('application/vnd.apple.mpegurl')}});ui=new shaka.ui.Overlay(player,container.current!,element);ui.configure({controlPanelElements:['play_pause','time_and_duration','spacer','mute','volume','overflow_menu','fullscreen'],overflowMenuButtons:['quality','language','captions','playback_rate','picture_in_picture'],seekBarColors:{base:'#ffffff30',buffered:'#ffffff60',played:'#d7ef75'},keyboardSeekDistance:10,seekOnTaps:true});ui.getControls()?.getLocalization()?.changeLocale(['ru']);player.addEventListener('error',event=>{if(disposed)return;const issue=playbackError((event as unknown as {detail:unknown}).detail);if(!issue)return;if(issue.fatal){setRecovery('');setError(issue.message);}else setRecovery(issue.message);});setInitialized(true);}catch(e){if(!disposed)setError(e instanceof Error?e.message:'Не удалось открыть плеер.');}})();
+  void(async()=>{try{const shaka=(await import('shaka-player/dist/shaka-player.ui')).default;if(disposed)return;shaka.polyfill.installAll();player=new shaka.Player();await player.attach(element);if(disposed){await player.destroy();return;}engine.current=player;player.configure({preferredAudioLanguage:'ru',preferredTextLanguage:'ru',streaming:{bufferingGoal:30,rebufferingGoal:3,lowLatencyMode:false,stallSkip:0,preferNativeHls:!!element.canPlayType('application/vnd.apple.mpegurl')}});for(const [name,label,eventName] of [['episode_settings','Серии','episode-settings'],['episode_next','→','episode-next']]){
+ shaka.ui.Controls.registerElement(name,{create(parent,controls){
+  class EpisodeControl extends shaka.ui.Element {
+   constructor(){super(parent,controls);const button=document.createElement('button');button.type='button';button.className=name==='episode_settings'?'watch-settings-toggle':'watch-next';button.textContent=label;button.setAttribute('aria-label',name==='episode_settings'?'Настройки серии':'Следующая серия');parent.appendChild(button);this.eventManager?.listen(button,'click',()=>parent.closest('.watch-player')?.dispatchEvent(new Event(eventName)));}
+  }
+  return new EpisodeControl();
+ }});
+}
+ui=new shaka.ui.Overlay(player,container.current!,element);ui.configure({controlPanelElements:['play_pause','episode_next','time_and_duration','spacer','mute','volume','episode_settings','overflow_menu','fullscreen'],overflowMenuButtons:['quality','language','captions','playback_rate','picture_in_picture'],seekBarColors:{base:'#ffffff30',buffered:'#ffffff60',played:'#d7ef75'},keyboardSeekDistance:10,seekOnTaps:true});ui.getControls()?.getLocalization()?.changeLocale(['ru']);player.addEventListener('error',event=>{if(disposed)return;const issue=playbackError((event as unknown as {detail:unknown}).detail);if(!issue)return;if(issue.fatal){setRecovery('');setError(issue.message);}else setRecovery(issue.message);});setInitialized(true);}catch(e){if(!disposed)setError(e instanceof Error?e.message:'Не удалось открыть плеер.');}})();
   return()=>{saveFn.current();disposed=true;engine.current=null;element.removeEventListener('playing',playing);element.removeEventListener('timeupdate',time);element.removeEventListener('pause',pause);element.removeEventListener('ended',ended);if(ui)void ui.destroy();else if(player)void player.destroy();};
  },[]);
  useEffect(()=>{const player=engine.current,element=video.current;if(!initialized||!player||!element||!data||!ready)return;let disposed=false;setPending(true);setError('');setRecovery('');
@@ -36,8 +57,8 @@ export function Player({data,storageKey,watch,controls,title,loading,externalErr
  const restart=()=>{loadPosition.current=0;if(video.current)video.current.currentTime=0;endedRef.current=false;saveFn.current('unwatched');setWatched(false);setResumeAt(0);};
  return <div className="watch-player" ref={container} tabIndex={0} aria-label={title||'Видеоплеер'}>
   <video ref={video} playsInline crossOrigin="anonymous" aria-label="Видео"/>
-  <div className="watch-top"><span>{title}</span><div>{onNext&&<button aria-label="Следующая серия" onClick={()=>{saveFn.current();onNext();}}>Следующая →</button>}<button aria-expanded={menu} onClick={()=>setMenu(v=>!v)}>☷ Настройки</button></div></div>
-  {menu&&<div className="watch-settings" onKeyDown={e=>e.stopPropagation()}><div className="watch-setting-fields">{controls}{data&&<label>Качество<select value={quality} onChange={e=>{loadPosition.current=video.current?.currentTime||0;setQuality(Number(e.target.value));}}>{data.sources.map((s,i)=><option key={i} value={i}>{s.quality?`${s.quality}p`:'Авто'}</option>)}</select></label>}</div><div className="watch-actions"><button disabled={!data} onClick={restart}>С начала</button><button disabled={!data} onClick={()=>watched?restart():saveFn.current('watched')}>{watched?'✓ Просмотрено — снять':'Отметить просмотренной'}</button><button onClick={()=>setMenu(false)}>Готово</button></div></div>}
+  <div className="watch-top"><span>{title}</span></div>
+  {menu&&<div id={menuId} ref={settingsRef} tabIndex={-1} role="region" aria-label="Настройки серии" className="watch-settings" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();closeMenu();}}}><div className="watch-settings-heading"><strong>Настройки серии</strong><button aria-label="Закрыть настройки" onClick={closeMenu}>×</button></div><div className="watch-setting-fields">{controls}{data&&<label>Качество<select value={quality} onChange={e=>{loadPosition.current=video.current?.currentTime||0;setQuality(Number(e.target.value));}}>{data.sources.map((s,i)=><option key={i} value={i}>{s.quality?`${s.quality}p`:'Авто'}</option>)}</select></label>}</div><div className="watch-actions"><button disabled={!data} onClick={restart}>С начала</button><button disabled={!data} onClick={()=>watched?restart():saveFn.current('watched')}>{watched?'✓ Просмотрено — снять':'Отметить просмотренной'}</button><button onClick={closeMenu}>Готово</button></div></div>}
   {!data&&!menu&&<div className="watch-empty"><p>{loading||externalError||'Выберите серию и перевод'}</p><button className="primary" onClick={()=>setMenu(true)}>Открыть настройки</button></div>}
   {(error||externalError)&&data&&<div className="watch-message" role="alert">{error||externalError}<button onClick={()=>{loadPosition.current=video.current?.currentTime||0;setRetry(v=>v+1);}}>Повторить</button><button onClick={()=>setMenu(true)}>Настройки</button></div>}
   {recovery&&!error&&!pending&&<p className="watch-loading" role="status">{recovery}</p>}

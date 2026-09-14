@@ -251,3 +251,56 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .invite-row {display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-top:16px;font-size:14px;}
 .invite-row small {color:#a7b1aa;flex:1;}
 @media(max-width:650px){.invite-panel{padding:14px;}.invite-link label{flex-basis:100%;}.invite-row{gap:8px;}}
+
+/* Dedicated title pages and controls embedded in the Shaka toolbar. */
+.watch-page {display:grid;gap:18px;padding:28px 0 48px;min-width:0;}
+.watch-back {width:fit-content;color:#d7ef75;font-size:14px;padding:8px 0;text-decoration:none;}
+.watch-page-title {font-size:clamp(24px,3vw,38px);font-weight:650;letter-spacing:-.8px;line-height:1.2;overflow-wrap:anywhere;}
+.watch-page>.muted {margin:0;}
+.watch-page>button {justify-self:start;}
+.watch-page .watch-player {height:auto;min-height:0;}
+.watch-player .shaka-controls-button-panel {gap:2px;}
+.anime-app .watch-player .shaka-controls-button-panel button {border-radius:6px;padding:0 8px;min-height:44px;min-width:40px;}
+.watch-player .shaka-controls-button-panel .watch-settings-toggle {font-family:inherit;font-size:14px;white-space:nowrap;color:#d7ef75;}
+.watch-player .shaka-controls-button-panel .watch-next {font-family:inherit;font-size:24px;}
+.watch-player .watch-next[hidden] {display:none;}
+.watch-player .watch-settings {inset:auto 12px 72px auto;width:min(440px,calc(100% - 24px));max-height:calc(100% - 88px);border-color:#ffffff24;background:#151c19f5;border-radius:10px;padding:16px;}
+.watch-settings-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;font-size:14px;}
+.watch-settings-heading button {font-size:24px;line-height:1;min-width:44px;min-height:44px;}
+.watch-player .watch-setting-fields {gap:12px;}
+.watch-player .watch-setting-fields select {font-size:14px;min-height:40px;text-overflow:ellipsis;}
+.watch-player .watch-actions {position:static;background:transparent;padding:8px 0 0;}
+.watch-player .watch-actions button {min-height:44px;font-size:13px;}
+.watch-player .watch-top {z-index:1;}
+.watch-player:fullscreen {height:100dvh;width:100%;}
+@media(max-width:650px){
+ .anime-app {padding:0 16px;}
+ .anime-app header {min-height:76px;gap:12px;}
+ .account {font-size:12px;gap:10px;}
+ .account>span {max-width:120px;overflow:hidden;text-overflow:ellipsis;}
+ .library-tabs {gap:6px;}
+ .library-tabs button {font-size:13px;min-height:44px;}
+ .extractor-search {gap:12px;}
+ .extractor-search label {min-width:0;flex-basis:calc(50% - 6px);}
+ .extractor-search input,.extractor-search select {font-size:16px;}
+ .extractor-search>.primary {width:100%;min-height:44px;}
+ .anime-card h2 {font-size:14px;}
+ .watch-page {gap:14px;padding-top:16px;}
+ .watch-page .watch-player {width:calc(100% + 32px);margin-inline:-16px;border-radius:0;}
+ .watch-player .shaka-controls-container {padding:0 6px;}
+ .watch-player .shaka-controls-button-panel {gap:0;}
+ .anime-app .watch-player .shaka-controls-button-panel button {padding:0 4px;min-width:32px;}
+ .watch-player .shaka-volume-bar-container {display:none;}
+ .watch-player .shaka-current-time {font-size:11px;padding:0 3px;}
+ .watch-player .shaka-controls-button-panel .watch-settings-toggle {font-size:12px;}
+ .watch-player .watch-settings {inset:0 0 58px;width:100%;max-height:none;border:0;border-radius:0;padding:10px 14px;}
+ .watch-settings-heading {margin-bottom:6px;}
+ .watch-player .watch-setting-fields {grid-template-columns:1fr;gap:12px;}
+ .watch-player .watch-setting-fields select,.watch-player .watch-setting-fields input {font-size:16px;min-height:44px;}
+ .watch-player .watch-settings-heading {position:sticky;top:-10px;background:#151c19;z-index:1;}
+ .watch-player .watch-empty {inset:0 0 58px;padding:10px;gap:8px;font-size:13px;}
+ .watch-player .watch-resume {top:8px;left:8px;font-size:12px;}
+ .watch-player .watch-message {inset:8px 8px 58px;overflow:auto;font-size:12px;padding:10px;}
+ .watch-player .watch-sync {bottom:58px;font-size:12px;max-height:60%;overflow:auto;}
+ .watch-player:fullscreen {width:100%;margin:0;}
+}
