@@ -340,3 +340,20 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 @media(max-width:650px){
  .watch-player .watch-settings {height:calc(100% - 56px);}
 }
+
+/* Live search suggestions stay anchored to the field, including on phones. */
+.search-suggest {position:relative;display:grid;gap:8px;min-width:0;width:340px;font-size:14px;}
+.extractor-search>.search-suggest {flex:1;min-width:180px;}
+.search-suggest-popup {position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:20;background:#18201c;border:1px solid #3d4a40;border-radius:12px;box-shadow:0 16px 40px #0007;overflow:hidden;}
+.search-suggest-status {padding:12px 14px;color:#a7b1aa;font-size:12px;}
+.search-suggest-popup ul {margin:0;padding:0;list-style:none;max-height:min(360px,42dvh);overflow-y:auto;overscroll-behavior:contain;}
+.search-suggest-option {display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 14px;cursor:pointer;}
+.search-suggest-option[aria-selected="true"] {background:#2c3928;}
+@media(hover:hover){.search-suggest-option:hover {background:#2c3928;}}
+.search-suggest-option img,.search-suggest-poster {width:32px;height:46px;object-fit:cover;border-radius:4px;background:#2c352e;flex-shrink:0;}
+.search-suggest-poster {display:grid;place-items:center;color:#9aaa82;font-size:12px;}
+.search-suggest-option>span:nth-child(2) {flex:1;min-width:0;display:grid;gap:4px;}
+.search-suggest-option strong {font-size:14px;line-height:1.4;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
+.search-suggest-option small,.search-suggest-option>span:last-child {color:#a7b1aa;font-size:12px;}
+.anime-app .search-suggest-all {width:100%;min-height:44px;border-top:1px solid #ffffff12;border-radius:0!important;text-align:left;color:#d7ef75;padding:12px 14px!important;font-size:13px;}
+@media(max-width:650px){.search-suggest,.extractor-search>.search-suggest {width:100%;flex-basis:100%;min-width:0;}.search-suggest input {font-size:16px;}.anime-heading>.search-suggest {margin-top:16px;}}

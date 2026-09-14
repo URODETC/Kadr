@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from 'next/link';
+import SearchSuggestions from '@/components/search-suggestions';
 import {useRouter} from 'next/navigation';
 import {watchUrl,type WatchPage} from '@/lib/watch-page';
 import HistoryShelf from "@/components/history-shelf";
@@ -75,6 +76,8 @@ export default function Anime({
       return next;
     });
   }
+  const [searchText,setSearchText]=useState("");
+  const suggest=useCallback(async(q:string,signal:AbortSignal)=>{const data=savedOnly?saved:await api(`/api/anime?q=${encodeURIComponent(q)}&page=1`,signal);const rows:Release[]=Array.isArray(data)?data:data.data||[];return rows.filter(r=>!savedOnly||r.name.main.toLowerCase().includes(q.toLowerCase())).map(r=>({id:String(r.id),title:r.name.main,image:image(r),subtitle:r.year?String(r.year):undefined,href:watchUrl({provider:"anilibria",id:String(r.id),title:r.name.main})}));},[savedOnly,saved]);
   const [items, setItems] = useState<Release[]>([]),
     [query, setQuery] = useState(""),
     [page, setPage] = useState(1),
@@ -187,19 +190,7 @@ export default function Anime({
         <div>
           <h1>Аниме</h1>
         </div>
-        {!external&&<label className="anime-search">
-          <span>Поиск аниме</span>
-          <input
-            type="search"
-            value={query}
-            placeholder="Название…"
-            maxLength={100}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>}
+        {!external&&<SearchSuggestions value={searchText} onChange={setSearchText} load={suggest} onSelect={i=>router.push(i.href)} onSearch={q=>{setQuery(q);setPage(1);}}/>}
       </section>
       <HistoryShelf onResume={r=>{if(r.provider==='anilibria'){setExternal(false);setSavedOnly(false);router.push(watchUrl({provider:"anilibria",id:r.titleKey.split(":")[1],title:r.title}));}else{setExternal(true);setResumeItem({...r});}}}/>
       <div className="library-tabs">
