@@ -67,6 +67,20 @@ test('invitations require origin, cannot be revoked by friends, expire and are o
  assert.equal(auth.db().prepare("SELECT COUNT(*) AS n FROM users WHERE username IN ('race_one','race_two')").get().n,1);
  const stored=auth.db().prepare('SELECT hash FROM invitations WHERE id=?').get(concurrent.id);assert.notEqual(stored.hash,concurrent.token);
 });
+test('user passwords accept 6 characters while admin passwords still require 12',async()=>{
+ const auth=await import('../lib/server/auth.mjs');
+ await assert.rejects(()=>auth.hashPassword('123456'),/от 12/);
+ await assert.rejects(()=>auth.createUser('short_admin','123456','admin'),/от 12/);
+ const issued=await(await req('/api/invitations',{method:'POST',cookie:adminCookie,body:{}})).json();
+ const token=new URLSearchParams(new URL(issued.url).hash.slice(1)).get('token');
+ assert.equal((await req('/api/auth/register',{method:'POST',body:{token,username:'six_chars',password:'12345'}})).status,400);
+ const registered=await req('/api/auth/register',{method:'POST',body:{token,username:'six_chars',password:'123456'}});assert.equal(registered.status,201);
+ const login=await req('/api/auth/login',{method:'POST',body:{username:'six_chars',password:'123456'}});assert.equal(login.status,200);
+ const id=auth.db().prepare("SELECT id FROM users WHERE username='six_chars'").get().id;
+ assert.equal((await req('/api/users',{method:'PATCH',cookie:adminCookie,body:{id,password:'12345'}})).status,400);
+ assert.equal((await req('/api/users',{method:'PATCH',cookie:adminCookie,body:{id,password:'abcdef'}})).status,200);
+ assert.equal((await req('/api/auth/login',{method:'POST',body:{username:'six_chars',password:'abcdef'}})).status,200);
+});
 test('extractor bridge validates routes and forwards server-owned identity',async()=>{
  const r=await fetch(base+'/api/extractor/providers',{headers:{Cookie:friendCookie,'X-User-Id':'999'}});
  assert.equal(r.status,200);assert.equal((await r.json()).items[0].id,'animego');

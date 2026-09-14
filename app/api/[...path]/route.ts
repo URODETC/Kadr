@@ -79,7 +79,7 @@ async function handle(request:Request){
    if(!target)return json({error:'Пользователь не найден.'},404);
    if(target.role==='admin')return json({error:'Суперадминистратор управляется через консоль сервера.'},403);
    if(method==='DELETE'){db().prepare('DELETE FROM users WHERE id=?').run(id);return json({ok:true});}
-   if(method==='PATCH'){const hash=await hashPassword(body.password);db().exec('BEGIN IMMEDIATE');try{db().prepare('UPDATE users SET password=? WHERE id=?').run(hash,id);db().prepare('DELETE FROM sessions WHERE user_id=?').run(id);db().exec('COMMIT');}catch(e){db().exec('ROLLBACK');throw e;}return json({ok:true});}
+   if(method==='PATCH'){const hash=await hashPassword(body.password,'user');db().exec('BEGIN IMMEDIATE');try{db().prepare('UPDATE users SET password=? WHERE id=?').run(hash,id);db().prepare('DELETE FROM sessions WHERE user_id=?').run(id);db().exec('COMMIT');}catch(e){db().exec('ROLLBACK');throw e;}return json({ok:true});}
   }
   if(method==='GET'&&(path==='anime'||/^anime\/\d+$/.test(path))){
    let route='';
