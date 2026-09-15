@@ -7,8 +7,9 @@ import {watchUrl,type WatchPage} from '@/lib/watch-page';
 import {Player} from '@/components/cinema/player';
 import {getProgress,clock,type WatchRecord} from '@/lib/watch';
 import type {Playback} from '@/lib/cinema/types';
+import {providerSegments} from '@/lib/cinema/segments';
 type Item={id:string;key:string;title:string;thumbnail:string};
-type Episode={id:string;ordinal:number;title:string};
+type Episode={id:string;ordinal:number;title:string;opening?:{start:number;stop:number};ending?:{start:number;stop:number}};
 type Source={id:string;title:string;player:string};
 type Details={title:string;description:string;episodes:Episode[]};
 async function api(path:string,signal?:AbortSignal){const r=await fetch('/api/extractor/'+path,{signal});if(r.status===401){location.replace('/login');throw new Error('Сессия истекла.');}const d=await r.json();if(!r.ok)throw new Error(d.error||'Ошибка источника');return d;}
@@ -28,7 +29,7 @@ export default function ExtractorBrowser({userId,resume,watchPage}:{userId:numbe
  useEffect(()=>{if(!item)return;const c=new AbortController();setStage('Загрузка серий…');setDetails(null);setEpisode(null);setSources([]);setPlayback(null);setDetailError('');setRecords([]);setTargetProvider(provider);setSeasonQuery(item.title);setRelated([item]);setRelatedError('');preferred.current='';Promise.all([api('anime/'+item.id,c.signal),getProgress(titleKey,c.signal)]).then(([d,rows])=>{setDetails(d);setRecords(rows);const last=rows[0];preferred.current=last?.sourceLabel||'';const index=d.episodes.findIndex((e:Episode)=>String(e.ordinal)===last?.episodeKey);setEpisode(d.episodes[index>=0?(last.watched&&d.episodes[index+1]?index+1:index):0]||null);}).catch(e=>{if(!c.signal.aborted)setDetailError(e.message);}).finally(()=>{if(!c.signal.aborted)setStage('');});return()=>c.abort();},[item,provider,titleKey]);
  useEffect(()=>{if(!titleKey)return;let alive=true;const load=()=>getProgress(titleKey).then(rows=>{if(alive)setRecords(rows);}).catch(()=>{});window.addEventListener('watch-progress',load);return()=>{alive=false;window.removeEventListener('watch-progress',load);};},[titleKey]);
  useEffect(()=>{setPlayback(null);setSources([]);setSource('');if(!episode)return;const c=new AbortController();setStage('Загрузка переводов…');setDetailError('');api('sources/'+episode.id,c.signal).then(d=>{setSources(d.items);setSource(d.items.find((s:Source)=>s.title===preferred.current)?.id||d.items[0]?.id||'');}).catch(e=>{if(!c.signal.aborted)setDetailError(e.message);}).finally(()=>{if(!c.signal.aborted)setStage('');});return()=>c.abort();},[episode]);
- useEffect(()=>{setPlayback(null);if(!source)return;const c=new AbortController();setStage('Загрузка видео…');setDetailError('');api('playback/'+source,c.signal).then(setPlayback).catch(e=>{if(!c.signal.aborted)setDetailError(e.message);}).finally(()=>{if(!c.signal.aborted)setStage('');});return()=>c.abort();},[source]);
+ useEffect(()=>{setPlayback(null);if(!source)return;const c=new AbortController();setStage('Загрузка видео…');setDetailError('');api('playback/'+source,c.signal).then(data=>setPlayback({...data,segments:providerSegments(episode)})).catch(e=>{if(!c.signal.aborted)setDetailError(e.message);}).finally(()=>{if(!c.signal.aborted)setStage('');});return()=>c.abort();},[source,episode]);
  useEffect(()=>()=>relatedAbort.current?.abort(),[]);
  async function findRelated(nextProvider=targetProvider){relatedAbort.current?.abort();const c=new AbortController();relatedAbort.current=c;setRelatedBusy(true);setRelatedError('');setRelated([]);try{const d=await api(`search/${nextProvider}?q=${encodeURIComponent(seasonQuery)}`,c.signal);if(!c.signal.aborted)setRelated(d.items);}catch(e){if(!c.signal.aborted)setRelatedError(e instanceof Error?e.message:'Ошибка поиска');}finally{if(!c.signal.aborted)setRelatedBusy(false);}}
  function close(){relatedAbort.current?.abort();setItem(null);setEpisode(null);setPlayback(null);}

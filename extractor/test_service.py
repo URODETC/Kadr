@@ -133,4 +133,15 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(r.status_code,502)
         self.assertNotIn('secret',r.text)
 
+
+class SkipMarkerTests(unittest.TestCase):
+    def test_provider_specific_markers_preserved(self):
+        episode = SimpleNamespace(data={'opening': {'start': 0, 'stop': 90}, 'ending': {'start': 1200, 'stop': 1290}})
+        self.assertEqual(service.episode_skips(episode, 'anilibria'), episode.data)
+        self.assertEqual(service.episode_skips(episode, 'animego'), {})
+
+    def test_invalid_and_missing_markers_are_ignored(self):
+        for value in [None, [], {'start': None, 'stop': 90}, {'start': True, 'stop': 90}, {'start': 10, 'stop': 0}, {'start': 0, 'stop': float('inf')}]:
+            self.assertEqual(service.episode_skips(SimpleNamespace(data={'opening': value}), 'anilibria'), {})
+
 if __name__=='__main__':unittest.main()

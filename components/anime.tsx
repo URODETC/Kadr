@@ -9,7 +9,10 @@ import {getProgress,clock,type WatchRecord} from "@/lib/watch";
 import ExtractorBrowser from "@/components/extractor-browser";
 import { Player } from "@/components/cinema/player";
 import type { Playback } from "@/lib/cinema/types";
+import {providerSegments} from '@/lib/cinema/segments';
 type Episode = {
+  opening?: {start:number|null;stop:number|null};
+  ending?: {start:number|null;stop:number|null};
   id: string;
   ordinal: number;
   name: string | null;
@@ -152,6 +155,7 @@ export default function Anime({
       sources.length
         ? {
             sources,
+            segments: providerSegments(e),
             subtitles: [],
             audios: [{ lang: "ru", label: "AniLiberty", original: false }],
           }

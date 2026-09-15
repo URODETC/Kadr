@@ -216,7 +216,26 @@ async def anime(handle: str, x_user_id: str | None = Header(default=None)):
     value, episodes = await bounded(resolve)
     return {'title': str(value.title), 'description': str(value.description or ''),
         'episodes': [{'id': registry.put(user, 'episode', e, entry.provider),
-            'title': str(e.title), 'ordinal': e.ordinal} for e in episodes[:2500]]}
+            'title': str(e.title), 'ordinal': e.ordinal,
+            **episode_skips(e, entry.provider)} for e in episodes[:2500]]}
+
+def episode_skips(episode, provider):
+    """Keep release-specific AniLiberty markers lost by anicli's Source model."""
+    if provider != 'anilibria':
+        return {}
+    data = getattr(episode, 'data', None)
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for kind in ('opening', 'ending'):
+        value = data.get(kind)
+        if not isinstance(value, dict):
+            continue
+        start, stop = value.get('start'), value.get('stop')
+        if (type(start) in (int, float) and type(stop) in (int, float)
+                and math.isfinite(start) and math.isfinite(stop) and 0 <= start < stop):
+            result[kind] = {'start': start, 'stop': stop}
+    return result
 
 @app.get('/sources/{handle}')
 async def sources(handle: str, x_user_id: str | None = Header(default=None)):
