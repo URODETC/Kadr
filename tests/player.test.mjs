@@ -13,6 +13,13 @@ test('recoverable segment errors do not become fatal playback errors',()=>{
  assert.equal(playbackError({severity:1,category:1,code:1002}).fatal,false);
  assert.equal(playbackError({severity:2,category:3,code:3016}).fatal,true);
 });
+test('transmuxing failure is distinct from a browser decoding error',()=>{
+ const result=playbackError({severity:2,category:3,code:3018,data:['https://cdn.test/?token=secret']});
+ assert.equal(result.fatal,true);
+ assert.match(result.message,/обработать видеофрагмент/);
+ assert.match(result.message,/3018/);
+ assert.ok(!result.message.includes('secret'));
+});
 test('source-switch cancellations are ignored and signed URLs are not shown',()=>{
  assert.equal(playbackError({severity:2,code:7000}),null);
  assert.equal(playbackError({severity:2,code:7001}),null);
