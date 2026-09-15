@@ -25,7 +25,7 @@ before(async()=>{
 after(async()=>{if(child){if(child.exitCode===null){child.kill('SIGTERM');await new Promise(r=>child.once('exit',r));}}if(extractorMock)await new Promise(r=>extractorMock.close(r));await rm(dir,{recursive:true,force:true});});
 test('anonymous users see only login; forged auth headers do not help',async()=>{
  for(const path of ['/','/admin','/credits']){const r=await req(path);assert.equal(r.status,307);assert.equal(new URL(r.headers.get('location'),base).pathname,'/login');}
- for(const path of ['/api/anime','/api/anime/10292','/api/users','/api/auth/me','/api/catalog','/api/progress','/api/invitations','/api/extractor/providers','/api/extractor/search/animego'])assert.equal((await req(path)).status,401);
+ for(const path of ['/api/anime','/api/anime/10292','/api/users','/api/auth/me','/api/catalog','/api/progress','/api/admin/dashboard','/api/invitations','/api/extractor/providers','/api/extractor/search/animego'])assert.equal((await req(path)).status,401);
  const fake=await fetch(base+'/api/users',{headers:{'oai-authenticated-user-id':'admin',Cookie:'anime_session='+'a'.repeat(64)}});assert.equal(fake.status,401);
  const login=await(await req('/login')).text();assert.ok(!login.includes('История о перекуре'));
 });
@@ -47,7 +47,7 @@ test('only admin issues invitations; friends choose credentials and cannot choos
  assert.equal((await(await req('/api/auth/me',{cookie:friendCookie})).json()).role,'user');
  assert.equal((await req('/api/auth/register',{method:'POST',body:{token,username:'another',password}})).status,410);
  assert.equal((await req('/api/auth/invitation',{method:'POST',body:{token}})).status,410);
- for(const path of ['/api/users','/api/invitations'])assert.equal((await req(path,{cookie:friendCookie})).status,403);
+ for(const path of ['/api/users','/api/invitations','/api/admin/dashboard'])assert.equal((await req(path,{cookie:friendCookie})).status,403);
  assert.equal((await req('/api/invitations',{method:'POST',cookie:friendCookie,body:{}})).status,403);
  assert.equal((await req('/admin',{cookie:friendCookie})).status,307);
  const listed=await req('/api/invitations',{cookie:adminCookie});assert.equal(listed.status,200);const list=await listed.json();assert.equal(list[0].used_by,'friend');assert.ok(!JSON.stringify(list).includes(token));assert.ok(!('hash' in list[0]));
@@ -102,6 +102,18 @@ test('server progress is private, survives another session, and rejects stale wr
  assert.equal((await req('/api/progress',{method:'POST',cookie:friendCookie,body:{...value,position:-1}})).status,400);
  assert.equal((await req('/api/progress',{method:'POST',cookie:friendCookie,body:{...value,duration:0}})).status,400);
  assert.equal((await req('/api/progress',{method:'POST',cookie:friendCookie,origin:'https://evil.example',body:value})).status,403);
+});
+test('activity uses authenticated identity and dashboard is admin-only',async()=>{
+ const body={path:'/',playing:true,title:'Dashboard test',userId:1};
+ assert.equal((await req('/api/activity',{method:'POST',body})).status,401);
+ assert.equal((await req('/api/activity',{method:'POST',cookie:friendCookie,body,origin:'https://evil.example'})).status,403);
+ assert.equal((await req('/api/activity',{method:'POST',cookie:friendCookie,body})).status,200);
+ const now=Date.now();const path=`/api/admin/dashboard?from=${now-3600000}&to=${now}`;
+ assert.equal((await req(path,{cookie:friendCookie})).status,403);
+ const r=await req(path,{cookie:adminCookie});assert.equal(r.status,200);assert.match(r.headers.get('cache-control'),/no-store/);
+ const data=await r.json();assert.equal(data.online[0].username,'friend');assert.equal(data.totals.watchMinutes,1);
+ assert.equal((await req('/api/admin/dashboard?from=bad&to=1',{cookie:adminCookie})).status,400);
+ assert.equal((await req('/api/activity',{method:'POST',cookie:friendCookie,body:{...body,path:'/register?token=secret'}})).status,400);
 });
 test('password reset and deletion revoke active sessions',async()=>{
  const users=await(await req('/api/users',{cookie:adminCookie})).json();const friend=users.find(u=>u.username==='friend');

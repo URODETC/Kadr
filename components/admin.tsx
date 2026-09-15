@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useState} from 'react';
+import AdminDashboard from './admin-dashboard';
 type User={id:number;username:string;role:string};
 type Invite={id:number;created_at:number;expires_at:number;used_at:number|null;revoked_at:number|null;used_by:string|null};
 export default function Admin(){
@@ -7,7 +8,7 @@ export default function Admin(){
  async function reload(){const results=await Promise.all(['/api/users','/api/invitations'].map(async path=>{const r=await fetch(path);if(r.status===401){location.replace('/login');throw new Error('Требуется вход.');}if(!r.ok)throw new Error('Не удалось загрузить участников.');return r.json();}));setUsers(results[0]);setInvites(results[1]);}
  useEffect(()=>{reload().catch(e=>setMessage(e.message));},[]);
  async function act(method:string,body:object,path='/api/users'){setBusy(true);setMessage('');try{const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error);if(d.url)setLink(d.url);setMessage('Готово');await reload();return true;}catch(e){setMessage(e instanceof Error?e.message:'Ошибка');return false;}finally{setBusy(false);}}
- return <main className="anime-app"><header><a className="brand" href="/">кадр<span> / anime</span></a><a href="/">← К аниме</a></header><h1>Свои люди</h1>
+ return <main className="anime-app"><header><a className="brand" href="/">кадр<span> / anime</span></a><a href="/">← К аниме</a></header><AdminDashboard/><h1>Свои люди</h1>
  <section className="invite-panel"><button className="primary" disabled={busy} onClick={()=>void act('POST',{},'/api/invitations')}>Создать приглашение</button><p className="muted">Одна ссылка — один аккаунт. Действует 7 дней.</p>
  {link&&<div className="invite-link"><label>Ссылка для друга<input readOnly value={link} onFocus={e=>e.target.select()}/></label><button disabled={busy} onClick={async()=>{try{await navigator.clipboard.writeText(link);setMessage('Ссылка скопирована');}catch{setMessage('Выделите и скопируйте ссылку вручную.');}}}>Скопировать</button><p className="muted">Сохраните ссылку: после перезагрузки она не показывается.</p></div>}
  <div>{invites.map(i=>{const active=!i.used_at&&!i.revoked_at&&i.expires_at>Date.now();return <div className="invite-row" key={i.id}><span>Приглашение #{i.id}</span><small>{i.used_at?`Использовано${i.used_by?' · '+i.used_by:''}`:i.revoked_at?'Отозвано':active?`До ${new Date(i.expires_at).toLocaleString('ru-RU')}`:'Истекло'}</small>{active&&<button disabled={busy} onClick={async()=>{if(await act('DELETE',{id:i.id},'/api/invitations'))setLink('');}}>Отозвать</button>}</div>;})}</div></section>

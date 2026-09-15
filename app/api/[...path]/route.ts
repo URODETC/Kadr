@@ -1,3 +1,4 @@
+import {recordActivity,dashboard} from '@/lib/server/activity.mjs';
 import {createInvitation,listInvitations,revokeInvitation,checkInvitation,acceptInvitation} from '@/lib/server/invitations.mjs';
 import {readProgress,writeProgress} from '@/lib/server/progress';
 import { currentUser, sameOrigin, db, allowAttempt, verifyPassword, newSession, cookie, removeSession, hashPassword } from '@/lib/server/auth.mjs';
@@ -37,6 +38,17 @@ async function handle(request:Request){
   }
   const user=currentUser(request) as {id:number;username:string;role:string}|null;
   if(!user)return json({error:'Требуется вход.'},401);
+  if(path==='activity'){
+   if(method!=='POST')return json({error:'Метод недоступен.'},405);
+   if(!allowAttempt('activity:'+user.id,400))return json({error:'Слишком много запросов.'},429);
+   return recordActivity(user.id,body)?json({ok:true}):json({error:'Некорректная активность.'},400);
+  }
+  if(path==='admin/dashboard'){
+   if(user.role!=='admin')return json({error:'Доступ только для суперадминистратора.'},403);
+   if(method!=='GET')return json({error:'Метод недоступен.'},405);
+   const result=dashboard(Number(url.searchParams.get('from')),Number(url.searchParams.get('to')));
+   return result?json(result):json({error:'Выберите корректный период в пределах последних 90 дней.'},400);
+  }
   if(path==='progress'){
    if(method==='GET'){const result=readProgress(user.id,url.searchParams.get('title'));return json(result,'status' in result?result.status:200);}
    if(method==='POST'){const result=writeProgress(user.id,body);return json(result,result.status);}

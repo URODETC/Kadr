@@ -168,7 +168,7 @@ export default function Anime({
         </Link>
         <div className="account">
           <span>{user.username}</span>
-          {user.role === "admin" && <a href="/admin">Участники</a>}
+          {user.role === "admin" && <a href="/admin">Админка</a>}
           <button
             onClick={async () => {
               try {

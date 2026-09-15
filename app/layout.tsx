@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ActivityTracker from "@/components/activity-tracker";
 
 export const metadata: Metadata = {
   title: "Кадр / anime",
@@ -17,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">{children}<ActivityTracker/></body>
     </html>
   );
 }
