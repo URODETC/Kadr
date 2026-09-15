@@ -4,6 +4,25 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import service
 
+class KodikQualityTests(unittest.TestCase):
+    def test_all_advertised_qualities_and_mirrors(self):
+        decoder = SimpleNamespace(_decode=lambda value: value)
+        videos = service.Kodik._extract(decoder, {
+            '720': [{'src': 'https://cdn.example/720.m3u8'}],
+            '1080': [{'src': 'https://cdn.example/1080.m3u8'}],
+            '2160': [{'src': 'https://cdn.example/2160.m3u8'}, {'src': 'https://mirror.example/2160.m3u8'}],
+            'metadata': {}, '480': [],
+        })
+        streams, blocked = service.normalize_videos(videos)
+        self.assertEqual([s['quality'] for s in streams], [2160, 2160, 1080, 720])
+        self.assertEqual(blocked, 0)
+
+    def test_sparse_old_release_does_not_invent_higher_quality(self):
+        videos = service.Kodik._extract(SimpleNamespace(_decode=lambda value: value), {
+            '480': [{'src': 'https://cdn.example/480.m3u8'}],
+        })
+        self.assertEqual([v.quality for v in videos], [480])
+
 class MockSource:
     title = 'Японский с субтитрами'
     url = 'https://player.example/episode'

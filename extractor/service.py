@@ -13,6 +13,29 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query
+from anicli_api.player.base import Video
+from anicli_api.player.kodik import Kodik
+
+
+def extract_kodik_qualities(self, response_api):
+    """Pinned anicli-api only reads 360/480/720; retain every advertised quality."""
+    videos = []
+    for key, entries in response_api.items():
+        if not str(key).isdigit() or int(key) <= 0 or not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get('src'), str):
+                continue
+            url = self._decode(entry['src'])
+            # Preserve the pinned decoder's workaround for Kodik's 720 response.
+            if int(key) == 720:
+                url = url.replace('/480.mp4:', '/720.mp4:')
+            videos.append(Video(type='m3u8', quality=int(key), url=url))
+    return videos
+
+
+# Both sync and async Kodik paths call this method on the registered decoder.
+Kodik._extract = extract_kodik_qualities
 
 # Explicit allowlist: no user-selected imports, URLs, cookies or credentials.
 PROVIDERS = {
