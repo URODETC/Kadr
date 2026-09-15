@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import ipaddress
 import logging
+import math
 import secrets
 import time
 from collections import OrderedDict
@@ -36,6 +37,39 @@ def extract_kodik_qualities(self, response_api):
 
 # Both sync and async Kodik paths call this method on the registered decoder.
 Kodik._extract = extract_kodik_qualities
+
+
+def yummy_episodes(anime, videos):
+    """Preserve fractional recap episodes instead of failing int('1168.5')."""
+    from anicli_api.source.yummy_anime import Episode
+    grouped = {}
+    for video in videos:
+        iframe = video.get('iframe_url')
+        if not isinstance(iframe, str) or not iframe or 'alloha' in iframe:
+            continue
+        try:
+            number = float(video['number'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(number) or number < 0 or number > 100000:
+            continue
+        ordinal = int(number) if number.is_integer() else number
+        grouped.setdefault(ordinal, []).append(video)
+    return [Episode(title=f'Серия {number}', ordinal=number, data=grouped[number],
+                    **anime._kwargs_http) for number in sorted(grouped)]
+
+
+async def yummy_get_episodes(self):
+    from anicli_api.source.yummy_anime import YummyAnimeApi
+    result = await YummyAnimeApi.async_anime_videos(self.http_async, id=self.data['anime_id'])
+    if not result.is_ok:
+        raise HTTPException(502, 'Не удалось получить список серий YummyAnime. Повторите попытку.')
+    return yummy_episodes(self, result.value['response'])
+
+
+# The service only uses the async provider interface. Other providers are unchanged.
+from anicli_api.source.yummy_anime import Anime as YummyAnime
+YummyAnime.a_get_episodes = yummy_get_episodes
 
 # Explicit allowlist: no user-selected imports, URLs, cookies or credentials.
 PROVIDERS = {

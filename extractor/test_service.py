@@ -1,8 +1,37 @@
 import time
 import unittest
+from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import service
+
+class YummyEpisodeTests(unittest.TestCase):
+    def test_long_series_with_fractional_episode_through_api(self):
+        from anicli_api.source.yummy_anime import Anime, YummyAnimeApi
+        anime = Anime(title='Ван-Пис', thumbnail='', description='', data={'anime_id':1512})
+        def video(number):
+            return {'number':str(number), 'iframe_url':'https://player.example/episode', 'data':{'dubbing':'Тест'}}
+        videos = [video(n) for n in range(1200, 0, -1)]
+        videos.extend([video('1168.5'),video('1168.50'),video('special'),video('NaN'),video('Infinity')])
+        old_registry = service.registry
+        service.registry = service.Registry()
+        try:
+            handle = service.registry.put('1','search',SimpleNamespace(a_get_anime=AsyncMock(return_value=anime)),'yummy_anime')
+            result = SimpleNamespace(is_ok=True,value={'response':videos})
+            with patch.object(YummyAnimeApi,'async_anime_videos',new=AsyncMock(return_value=result)), TestClient(service.app) as client:
+                response = client.get('/anime/'+handle,headers={'X-User-Id':'1'})
+                self.assertEqual(response.status_code,200,response.text)
+                episodes = response.json()['episodes']
+                self.assertEqual(len(episodes),1201)
+                self.assertEqual(episodes[0]['ordinal'],1)
+                self.assertEqual(episodes[-1]['ordinal'],1200)
+                self.assertEqual(episodes[1167]['ordinal'],1168)
+                self.assertEqual(episodes[1168]['ordinal'],1168.5)
+                sources = client.get('/sources/'+episodes[1168]['id'],headers={'X-User-Id':'1'})
+                self.assertEqual(sources.status_code,200)
+                self.assertEqual(len(sources.json()['items']),2)
+        finally:
+            service.registry = old_registry
 
 class KodikQualityTests(unittest.TestCase):
     def test_all_advertised_qualities_and_mirrors(self):
